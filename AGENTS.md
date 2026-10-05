@@ -72,22 +72,22 @@ flowchart TD
 
 ### Fase 2: Persistência e Coordenação de Disparos
 
-* [ ] Implementar `CatEventEntity` e criar `CatEventDao` (operações: `insert`, `getAllEventsPaged`, `deleteOldEvents`).
-* [ ] Criar `CatWatchDatabase` via Room.
-* [ ] Implementar `CaptureCoordinator` com:
+* [x] Implementar `CatEventEntity` e criar `CatEventDao` (operações: `insert`, `getAllEventsPaged`, `deleteOldEvents`).
+* [x] Criar `CatWatchDatabase` via Room.
+* [x] Implementar `CaptureCoordinator` com:
   * Lógica de cooldown temporal (15s padrão).
   * Gestão de diretório em disco (`filesDir/cat_events`).
   * Despacho de gravação em thread de I/O dedicada.
-* **Gate de Aceite:** Testes unitários validando que candidatos recebidos durante a janela de cooldown são ignorados.
+* [ ] **Gate de Aceite:** Testes unitários validando que candidatos recebidos durante a janela de cooldown são ignorados.
 
 ### Fase 3: Pipeline de Visão Computacional (CameraX + ML Kit)
 
-* [ ] Implementar `CatDetectorAnalyzer` implementando `ImageAnalysis.Analyzer`:
+* [x] Implementar `CatDetectorAnalyzer` implementando `ImageAnalysis.Analyzer`:
   * Subamostragem por timestamp (descarte se intervalo < 500ms).
   * Conversão de `ImageProxy` para `InputImage`.
   * Integração com `com.google.mlkit:image-labeling` on-device com threshold $\ge 0.60$.
   * Garantia de fechamento de buffer `imageProxy.close()` em `addOnCompleteListener`.
-* **Gate de Aceite:** O analisador processa frames sem estourar o limite de 2 FPS e libera 100% dos buffers.
+* **Gate de Aceite:** O analisador processa frames sem estourar o limite de 2 FPS e libera 100% dos buffers. (Código concluído; validação em tempo de execução integrada à Fase 4).
 
 ### Fase 4: Interface de Monitoramento e Integração do Ciclo de Vida
 
