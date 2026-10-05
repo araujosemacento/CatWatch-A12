@@ -26,6 +26,7 @@ import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.content.ContextCompat
 import androidx.core.util.Pair
 import androidx.lifecycle.lifecycleScope
+import com.catwatch.detector.R
 import com.catwatch.detector.camera.CatDetectorAnalyzer
 import com.catwatch.detector.core.CaptureCoordinator
 import com.catwatch.detector.data.CatEventEntity
@@ -45,11 +46,13 @@ import java.util.Locale
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
+import androidx.activity.viewModels
+
 class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
     private lateinit var adapter: CatEventAdapter
-    private lateinit var repository: com.catwatch.detector.data.CatEventRepository
+    private val viewModel: CatEventViewModel by viewModels()
 
     private var imageCapture: ImageCapture? = null
     private var captureCoordinator: CaptureCoordinator? = null
@@ -57,7 +60,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var cameraExecutor: ExecutorService
     private lateinit var ioExecutor: ExecutorService
 
-    private var currentFilterJob: Job? = null
     private val dateFormat = SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.getDefault())
 
     private val permissionLauncher = registerForActivityResult(
@@ -79,9 +81,6 @@ class MainActivity : AppCompatActivity() {
         // Mantém tela ligada enquanto o app estiver no primeiro plano
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
-        val database = CatWatchDatabase.getDatabase(this)
-        repository = com.catwatch.detector.data.CatEventRepository(this, database.catEventDao())
-        
         cameraExecutor = Executors.newSingleThreadExecutor()
         ioExecutor = Executors.newSingleThreadExecutor()
 
@@ -90,8 +89,15 @@ class MainActivity : AppCompatActivity() {
         setupFilterChips()
         checkAndRequestPermissions()
 
-        // Inicia carregando todos os eventos
-        applyFilterAll()
+        observeViewModel()
+    }
+
+    private fun observeViewModel() {
+        lifecycleScope.launch {
+            viewModel.eventsState.collect { events ->
+                updateFeed(events)
+            }
+        }
     }
 
     private fun setupRecyclerView() {
@@ -153,8 +159,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun executeBatchDeletion(items: List<CatEventEntity>) {
-        lifecycleScope.launch {
-            repository.deleteEventsBatch(items)
+        viewModel.deleteEventsBatch(items) {
             Toast.makeText(this@MainActivity, "${items.size} fotos excluídas com sucesso.", Toast.LENGTH_SHORT).show()
             exitSelectionMode()
         }
@@ -169,39 +174,19 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun applyFilterAll() {
-        currentFilterJob?.cancel()
-        currentFilterJob = lifecycleScope.launch {
-            repository.getAllEvents().collect { events ->
-                updateFeed(events)
-            }
-        }
+        viewModel.loadAllEvents()
     }
 
     private fun applyFilterToday() {
-        currentFilterJob?.cancel()
-        currentFilterJob = lifecycleScope.launch {
-            repository.getEventsToday().collect { events ->
-                updateFeed(events)
-            }
-        }
+        viewModel.loadEventsToday()
     }
 
     private fun applyFilter24h() {
-        currentFilterJob?.cancel()
-        currentFilterJob = lifecycleScope.launch {
-            repository.getEventsLast24h().collect { events ->
-                updateFeed(events)
-            }
-        }
+        viewModel.loadEventsLast24h()
     }
 
     private fun applyFilterYesterday() {
-        currentFilterJob?.cancel()
-        currentFilterJob = lifecycleScope.launch {
-            repository.getEventsYesterday().collect { events ->
-                updateFeed(events)
-            }
-        }
+        viewModel.loadEventsYesterday()
     }
 
     private fun openDateRangePicker() {
@@ -215,12 +200,7 @@ class MainActivity : AppCompatActivity() {
                 // Adiciona o final do dia de término (23:59:59)
                 val end = (selection.second ?: start) + (24 * 60 * 60 * 1000L - 1)
 
-                currentFilterJob?.cancel()
-                currentFilterJob = lifecycleScope.launch {
-                    repository.getEventsByRange(start, end).collect { events ->
-                        updateFeed(events)
-                    }
-                }
+                viewModel.loadEventsByRange(start, end)
             }
         }
 
@@ -238,17 +218,19 @@ class MainActivity : AppCompatActivity() {
         val dialogBinding = DialogFullscreenImageBinding.inflate(layoutInflater)
         dialog.setContentView(dialogBinding.root)
 
-        // Metadados
-        dialogBinding.dialogTimestamp.text = "📅 ${dateFormat.format(Date(event.timestamp))}"
-        dialogBinding.dialogConfidence.text = "🎯 Confiança ML Kit: %.1f%%".format(event.confidence * 100)
-        dialogBinding.dialogFilePath.text = "📁 ${event.filePath}"
+        // Metadados (sem emojis)
+        dialogBinding.dialogTimestamp.text = "Data/Hora: ${dateFormat.format(Date(event.timestamp))}"
+        dialogBinding.dialogConfidence.text = "Confiança: %.1f%%".format(event.confidence * 100)
+        dialogBinding.dialogFilePath.text = "Arquivo: ${event.filePath}"
 
         if (event.isConfirmedDrinking || event.eventType == "DRINKING") {
-            dialogBinding.dialogStatusBadge.text = "💧 Hidratação Confirmada"
-            dialogBinding.dialogStatusBadge.setBackgroundColor(Color.parseColor("#2E7D32"))
+            dialogBinding.dialogStatusBadge.text = "Hidratação Confirmada"
+            dialogBinding.dialogStatusBadge.setBackgroundResource(R.drawable.bg_badge_drinking)
+            dialogBinding.dialogStatusBadge.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_water_drop, 0, 0, 0)
         } else {
-            dialogBinding.dialogStatusBadge.text = "🐾 Aproximação"
-            dialogBinding.dialogStatusBadge.setBackgroundColor(Color.parseColor("#1565C0"))
+            dialogBinding.dialogStatusBadge.text = "Aproximação"
+            dialogBinding.dialogStatusBadge.setBackgroundResource(R.drawable.bg_badge_approach)
+            dialogBinding.dialogStatusBadge.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_visibility, 0, 0, 0)
         }
 
         // Carrega imagem em alta resolução
@@ -272,8 +254,7 @@ class MainActivity : AppCompatActivity() {
                 .setTitle("Excluir Registro")
                 .setMessage("Deseja excluir permanentemente este registro?")
                 .setPositiveButton("Excluir") { _, _ ->
-                    lifecycleScope.launch {
-                        repository.deleteEvent(event)
+                    viewModel.deleteEvent(event) {
                         Toast.makeText(this@MainActivity, "Registro excluído.", Toast.LENGTH_SHORT).show()
                         dialog.dismiss()
                     }
@@ -360,10 +341,7 @@ class MainActivity : AppCompatActivity() {
                         eventType = eventType,
                         isConfirmedDrinking = isConfirmed
                     )
-                    lifecycleScope.launch(Dispatchers.IO) {
-                        val database = CatWatchDatabase.getDatabase(applicationContext)
-                        database.catEventDao().insert(event)
-                    }
+                    viewModel.insertEvent(event)
                 }
             )
             captureCoordinator = coordinator

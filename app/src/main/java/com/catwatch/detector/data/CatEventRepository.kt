@@ -14,6 +14,10 @@ class CatEventRepository(
     private val dao: CatEventDao
 ) {
     fun getAllEvents(): Flow<List<CatEventEntity>> = dao.getAllEvents()
+    
+    suspend fun insertEvent(event: CatEventEntity) = withContext(Dispatchers.IO) {
+        dao.insert(event)
+    }
 
     fun getEventsToday(): Flow<List<CatEventEntity>> {
         val calendar = Calendar.getInstance().apply {

@@ -73,8 +73,10 @@ dependencies {
     implementation("androidx.room:room-ktx:$roomVersion")
     ksp("androidx.room:room-compiler:$roomVersion")
 
-    // Lifecycle
+    // Lifecycle & ViewModel
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.7.0")
+    implementation("androidx.activity:activity-ktx:1.8.2")
 
     // Testes Unitários
     testImplementation("junit:junit:4.13.2")

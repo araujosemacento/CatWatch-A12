@@ -15,6 +15,8 @@ Para evitar duplicação de informações e manter uma **única fonte da verdade
 1. **Zero Gravação de Vídeo:** Sob nenhuma hipótese adicione bibliotecas de gravação de vídeo contínua (`VideoCapture` ou `MediaRecorder`). O projeto opera estritamente com análise em memória (`ImageAnalysis`) e fotos pontuais sob demanda (`ImageCapture`).
 2. **Buffer Safety Mandatória:** Toda chamada ao `ImageProxy` no analisador deve encerrar obrigatoriamente com `imageProxy.close()`, independentemente de exceções, sucesso ou descarte por throttle.
 3. **Respeito ao Hardware Exynos 850:** Nunca eleve a taxa de inferência acima de 2 FPS e nunca execute inferência ou I/O em disco na thread principal (*MainThread*).
+4. **Zero Emojis na Interface:** É estritamente proibido utilizar emojis em textos de UI (botões, chips, badges de status, diálogos, títulos ou notificações). Utilize texto técnico limpo e, quando necessário reforço visual, utilize ícones vetoriais nativos do Android (Drawables / Vector Drawables / Material Icons).
+5. **Resiliência e Não-Sobreposição de Layout:** Nenhum layout pode sobrepor componentes ou sofrer cortes acidentais de conteúdo por rigidez de contêiner em decorrência de escala de fonte (acessibilidade de até 200%), zoom de tela ou orientação. O uso de reticências/elipses (`ellipsize`) controladas em textos extensos (ex: nomes de arquivos e caminhos no disco) é permitido e recomendado para preservar a coesão e proporção visual do layout. Nunca utilize âncoras frágeis em views com visibilidade dinâmica (`GONE`); utilize contêineres unificados e larguras flexíveis (`0dp`) com restrições bidirecionais.
 
 ---
 
@@ -175,3 +177,5 @@ Todo pull request ou entrega de código gerada por agentes deve ser checada cont
 * [ ] **Background Threading:** A chamada `ImageCapture.takePicture()` e o processamento de banco Room utilizam executores assíncronos (`Dispatchers.IO` ou `ExecutorService`).
 * [ ] **Cooldown Respeitado:** O timestamp de última captura é validado antes de invocar `takePicture()`.
 * [ ] **Imagens Otimizadas:** A resolução de análise está travada em VGA (640x480).
+* [ ] **Zero Emojis:** Nenhum caractere emoji em textos da interface do usuário.
+* [ ] **Layout Responsivo:** Nenhuma sobreposição ou corte indevido de texto ao variar fontes e escalas de tela (elipses intencionais são aceitas).

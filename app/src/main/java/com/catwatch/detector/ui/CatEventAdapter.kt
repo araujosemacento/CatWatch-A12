@@ -114,13 +114,15 @@ class CatEventAdapter : ListAdapter<CatEventEntity, CatEventAdapter.CatEventView
             binding.confidenceTextView.text = "Confiança: %.1f%%".format(event.confidence * 100)
             binding.filePathTextView.text = File(event.filePath).name
 
-            // Status Badge: Hidratação vs Aproximação
+            // Status Badge: Hidratação vs Aproximação (sem emojis, com ícones vetoriais nativos)
             if (event.isConfirmedDrinking || event.eventType == "DRINKING") {
-                binding.statusBadgeTextView.text = "💧 Bebendo"
-                binding.statusBadgeTextView.setBackgroundColor(Color.parseColor("#2E7D32"))
+                binding.statusBadgeTextView.text = "Bebendo"
+                binding.statusBadgeTextView.setBackgroundResource(com.catwatch.detector.R.drawable.bg_badge_drinking)
+                binding.statusBadgeTextView.setCompoundDrawablesWithIntrinsicBounds(com.catwatch.detector.R.drawable.ic_water_drop, 0, 0, 0)
             } else {
-                binding.statusBadgeTextView.text = "🐾 Aproximação"
-                binding.statusBadgeTextView.setBackgroundColor(Color.parseColor("#1565C0"))
+                binding.statusBadgeTextView.text = "Aproximação"
+                binding.statusBadgeTextView.setBackgroundResource(com.catwatch.detector.R.drawable.bg_badge_approach)
+                binding.statusBadgeTextView.setCompoundDrawablesWithIntrinsicBounds(com.catwatch.detector.R.drawable.ic_visibility, 0, 0, 0)
             }
 
             // Controle de Checkbox no Modo de Seleção Múltipla

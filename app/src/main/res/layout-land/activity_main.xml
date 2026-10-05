@@ -6,34 +6,34 @@
     android:layout_height="match_parent"
     android:background="@color/black">
 
-    <!-- Metade Superior: Preview da Câmera -->
+    <!-- Metade Esquerda: Preview da Câmera em Paisagem -->
     <androidx.camera.view.PreviewView
         android:id="@+id/viewFinder"
         android:layout_width="0dp"
         android:layout_height="0dp"
         app:implementationMode="compatible"
-        app:layout_constraintBottom_toTopOf="@id/guideline"
-        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toStartOf="@id/guideline"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent" />
 
-    <!-- Guideline 45% para divisão de tela em retrato -->
+    <!-- Guideline 50% Vertical para Divisão em Paisagem -->
     <androidx.constraintlayout.widget.Guideline
         android:id="@+id/guideline"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        app:layout_constraintGuide_percent="0.45" />
+        android:orientation="vertical"
+        app:layout_constraintGuide_percent="0.50" />
 
-    <!-- Metade Inferior: Painel de Controle e Feed -->
+    <!-- Metade Direita: Painel de Controle e Feed -->
     <androidx.constraintlayout.widget.ConstraintLayout
         android:layout_width="0dp"
         android:layout_height="0dp"
         android:background="#121212"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/guideline">
+        app:layout_constraintStart_toEndOf="@id/guideline"
+        app:layout_constraintTop_toTopOf="parent">
 
         <!-- Contêiner Unificado de Toolbars: Evita sobreposição com os chips de filtro -->
         <FrameLayout
@@ -157,7 +157,7 @@
             </RelativeLayout>
         </FrameLayout>
 
-        <!-- Barra de Filtros Temporais (Chips): Ancorada ao contêiner unificado de toolbar -->
+        <!-- Barra de Filtros Temporais (Chips) -->
         <HorizontalScrollView
             android:id="@+id/filterScrollView"
             android:layout_width="match_parent"
