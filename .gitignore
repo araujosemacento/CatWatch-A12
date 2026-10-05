@@ -21,6 +21,9 @@ captures/
 .externalNativeBuild/
 .cxx/
 
+# VSCode
+.vscode/
+
 # Kotlin & KSP generated artifacts
 .kotlin/
 
