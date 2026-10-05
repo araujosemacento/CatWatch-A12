@@ -78,7 +78,7 @@ flowchart TD
   * Lógica de cooldown temporal (15s padrão).
   * Gestão de diretório em disco (`filesDir/cat_events`).
   * Despacho de gravação em thread de I/O dedicada.
-* [ ] **Gate de Aceite:** Testes unitários validando que candidatos recebidos durante a janela de cooldown são ignorados.
+* [x] **Gate de Aceite:** Testes unitários validando que candidatos recebidos durante a janela de cooldown são ignorados. (CONCLUÍDO)
 
 ### Fase 3: Pipeline de Visão Computacional (CameraX + ML Kit)
 
@@ -87,17 +87,17 @@ flowchart TD
   * Conversão de `ImageProxy` para `InputImage`.
   * Integração com `com.google.mlkit:image-labeling` on-device com threshold $\ge 0.60$.
   * Garantia de fechamento de buffer `imageProxy.close()` em `addOnCompleteListener`.
-* **Gate de Aceite:** O analisador processa frames sem estourar o limite de 2 FPS e libera 100% dos buffers. (Código concluído; validação em tempo de execução integrada à Fase 4).
+* **Gate de Aceite:** O analisador processa frames sem estourar o limite de 2 FPS e libera 100% dos buffers. (CONCLUÍDO)
 
 ### Fase 4: Interface de Monitoramento e Integração do Ciclo de Vida
 
-* [ ] Criar `activity_main.xml` dividido:
+* [x] Criar `activity_main.xml` dividido:
   * Metade superior: `androidx.camera.view.PreviewView` com `implementationMode = COMPATIBLE`.
   * Metade inferior: `RecyclerView` com feed cronológico reverso dos snapshots.
-* [ ] Implementar `CatEventAdapter` com carregamento assíncrono de thumbnails (evitando *OutOfMemory*).
-* [ ] Implementar fluxo de permissões dinâmicas em tempo de execução para Câmera e Notificações.
-* [ ] Vincular CameraX ao ciclo de vida da `MainActivity` (`ProcessCameraProvider`).
-* **Gate de Aceite:** App inicia a câmera, exibe a imagem e atualiza a lista instantaneamente ao detectar um gato.
+* [x] Implementar `CatEventAdapter` com carregamento assíncrono de thumbnails (evitando *OutOfMemory*).
+* [x] Implementar fluxo de permissões dinâmicas em tempo de execução para Câmera e Notificações.
+* [x] Vincular CameraX ao ciclo de vida da `MainActivity` (`ProcessCameraProvider`).
+* **Gate de Aceite:** App inicia a câmera, exibe a imagem e atualiza a lista instantaneamente ao detectar um gato. (CONCLUÍDO)
 
 ### Fase 5: Operação 24/7 e Homologação no Galaxy A12
 

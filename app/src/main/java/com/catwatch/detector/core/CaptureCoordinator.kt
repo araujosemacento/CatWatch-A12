@@ -11,27 +11,39 @@ import java.util.Locale
 import java.util.concurrent.ExecutorService
 
 class CaptureCoordinator(
-    private val context: Context,
-    private val imageCapture: ImageCapture,
-    private val ioExecutor: ExecutorService,
-    private val onEventLogged: (File, Float) -> Unit
+    private val context: Context? = null,
+    private val imageCapture: ImageCapture? = null,
+    private val ioExecutor: ExecutorService? = null,
+    private val onEventLogged: ((File, Float) -> Unit)? = null,
+    private val currentTimeProvider: () -> Long = { System.currentTimeMillis() },
+    private val snapshotAction: ((Float) -> Unit)? = null
 ) {
     private var lastCaptureTimestamp = 0L
     private val cooldownDurationMs = 15_000L // 15 segundos entre eventos consecutivos
 
-    fun onCatCandidate(confidence: Float = 1.0f) {
-        val now = System.currentTimeMillis()
+    fun onCatCandidate(confidence: Float = 1.0f): Boolean {
+        val now = currentTimeProvider()
         if (now - lastCaptureTimestamp < cooldownDurationMs) {
             // Animal ainda em cena ou evento duplicado recente
-            return
+            return false
         }
 
         lastCaptureTimestamp = now
-        executeSnapshot(confidence)
+        if (snapshotAction != null) {
+            snapshotAction.invoke(confidence)
+        } else {
+            executeSnapshot(confidence)
+        }
+        return true
     }
 
     private fun executeSnapshot(confidence: Float) {
-        val storageDir = File(context.filesDir, "cat_events").apply {
+        val ctx = context ?: return
+        val capture = imageCapture ?: return
+        val executor = ioExecutor ?: return
+        val onLogged = onEventLogged ?: return
+
+        val storageDir = File(ctx.filesDir, "cat_events").apply {
             if (!exists()) mkdirs()
         }
 
@@ -40,13 +52,13 @@ class CaptureCoordinator(
 
         val outputOptions = ImageCapture.OutputFileOptions.Builder(photoFile).build()
 
-        imageCapture.takePicture(
+        capture.takePicture(
             outputOptions,
-            ioExecutor,
+            executor,
             object : ImageCapture.OnImageSavedCallback {
                 override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
                     Log.i("CaptureCoordinator", "Snapshot gravado com sucesso: ${photoFile.absolutePath}")
-                    onEventLogged(photoFile, confidence)
+                    onLogged.invoke(photoFile, confidence)
                 }
 
                 override fun onError(exception: ImageCaptureException) {

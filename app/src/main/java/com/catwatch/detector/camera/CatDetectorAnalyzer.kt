@@ -8,15 +8,13 @@ import com.google.mlkit.vision.label.ImageLabeling
 import com.google.mlkit.vision.label.defaults.ImageLabelerOptions
 
 class CatDetectorAnalyzer(
-    private val onCatDetected: (Float) -> Unit
+    private val onCatDetected: (Float) -> Unit,
+    private val labeler: com.google.mlkit.vision.label.ImageLabeler = ImageLabeling.getClient(
+        ImageLabelerOptions.Builder().setConfidenceThreshold(0.60f).build()
+    ),
+    private val currentTimeProvider: () -> Long = { System.currentTimeMillis() }
 ) : ImageAnalysis.Analyzer {
 
-    // Configuração do detetor on-device com ‘threshold’ de confiança
-    private val options = ImageLabelerOptions.Builder()
-        .setConfidenceThreshold(0.60f)
-        .build()
-
-    private val labeler = ImageLabeling.getClient(options)
     
     // Controle de throttling: Processar no máximo 2 quadros por segundo
     private var lastAnalyzedTimestamp = 0L
@@ -24,7 +22,7 @@ class CatDetectorAnalyzer(
 
     @androidx.annotation.OptIn(ExperimentalGetImage::class)
     override fun analyze(imageProxy: ImageProxy) {
-        val currentTimestamp = System.currentTimeMillis()
+        val currentTimestamp = currentTimeProvider()
 
         // Descarte rápido caso o intervalo de subamostragem não tenha decorrido
         if (currentTimestamp - lastAnalyzedTimestamp < throttleIntervalMs) {
@@ -32,13 +30,13 @@ class CatDetectorAnalyzer(
             return
         }
 
+        lastAnalyzedTimestamp = currentTimestamp
+
         val mediaImage = imageProxy.image
         if (mediaImage == null) {
             imageProxy.close()
             return
         }
-
-        lastAnalyzedTimestamp = currentTimestamp
         val inputImage = InputImage.fromMediaImage(mediaImage, imageProxy.imageInfo.rotationDegrees)
 
         labeler.process(inputImage)
@@ -55,10 +53,10 @@ class CatDetectorAnalyzer(
                 }
             }
             .addOnFailureListener {
-                // Silenciar ou registrar ‘logs’ mínimos para não onerar o I/O
+                // Silenciar ou registrar logs mínimos para não onerar o I/O
             }
             .addOnCompleteListener {
-                // Fechar o ImageProxy é imperativo para evitar o congelamento do ‘buffer’ CameraX
+                // Fechar o ImageProxy é imperativo para evitar o congelamento do buffer CameraX
                 imageProxy.close()
             }
     }
