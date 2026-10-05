@@ -2,7 +2,9 @@ package com.catwatch.detector.ui
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Color
 import android.view.LayoutInflater
+import android.view.View
 import android.view.ViewGroup
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
@@ -23,6 +25,53 @@ class CatEventAdapter : ListAdapter<CatEventEntity, CatEventAdapter.CatEventView
 
     private val dateFormat = SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.getDefault())
 
+    var isSelectionMode: Boolean = false
+        private set
+
+    val selectedIds = mutableSetOf<Long>()
+
+    var onItemClick: ((CatEventEntity) -> Unit)? = null
+    var onItemLongClick: ((CatEventEntity) -> Unit)? = null
+    var onSelectionChanged: ((Int) -> Unit)? = null
+
+    fun setSelectionMode(enabled: Boolean) {
+        if (isSelectionMode != enabled) {
+            isSelectionMode = enabled
+            if (!enabled) {
+                selectedIds.clear()
+            }
+            notifyDataSetChanged()
+            onSelectionChanged?.invoke(selectedIds.size)
+        }
+    }
+
+    fun toggleSelection(id: Long, position: Int) {
+        if (selectedIds.contains(id)) {
+            selectedIds.remove(id)
+        } else {
+            selectedIds.add(id)
+        }
+        notifyItemChanged(position)
+        onSelectionChanged?.invoke(selectedIds.size)
+    }
+
+    fun selectAll() {
+        selectedIds.clear()
+        selectedIds.addAll(currentList.map { it.id })
+        notifyDataSetChanged()
+        onSelectionChanged?.invoke(selectedIds.size)
+    }
+
+    fun clearSelection() {
+        selectedIds.clear()
+        notifyDataSetChanged()
+        onSelectionChanged?.invoke(0)
+    }
+
+    fun getSelectedItems(): List<CatEventEntity> {
+        return currentList.filter { selectedIds.contains(it.id) }
+    }
+
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): CatEventViewHolder {
         val binding = ItemCatEventBinding.inflate(
             LayoutInflater.from(parent.context),
@@ -33,7 +82,25 @@ class CatEventAdapter : ListAdapter<CatEventEntity, CatEventAdapter.CatEventView
     }
 
     override fun onBindViewHolder(holder: CatEventViewHolder, position: Int) {
-        holder.bind(getItem(position))
+        val event = getItem(position)
+        holder.bind(event, position)
+
+        holder.itemView.setOnClickListener {
+            if (isSelectionMode) {
+                toggleSelection(event.id, holder.bindingAdapterPosition)
+            } else {
+                onItemClick?.invoke(event)
+            }
+        }
+
+        holder.itemView.setOnLongClickListener {
+            if (!isSelectionMode) {
+                setSelectionMode(true)
+                toggleSelection(event.id, holder.bindingAdapterPosition)
+            }
+            onItemLongClick?.invoke(event)
+            true
+        }
     }
 
     inner class CatEventViewHolder(
@@ -42,18 +109,38 @@ class CatEventAdapter : ListAdapter<CatEventEntity, CatEventAdapter.CatEventView
 
         private var loadJob: Job? = null
 
-        fun bind(event: CatEventEntity) {
+        fun bind(event: CatEventEntity, position: Int) {
             binding.timestampTextView.text = dateFormat.format(Date(event.timestamp))
             binding.confidenceTextView.text = "Confiança: %.1f%%".format(event.confidence * 100)
             binding.filePathTextView.text = File(event.filePath).name
 
+            // Status Badge: Hidratação vs Aproximação
+            if (event.isConfirmedDrinking || event.eventType == "DRINKING") {
+                binding.statusBadgeTextView.text = "💧 Bebendo"
+                binding.statusBadgeTextView.setBackgroundColor(Color.parseColor("#2E7D32"))
+            } else {
+                binding.statusBadgeTextView.text = "🐾 Aproximação"
+                binding.statusBadgeTextView.setBackgroundColor(Color.parseColor("#1565C0"))
+            }
+
+            // Controle de Checkbox no Modo de Seleção Múltipla
+            if (isSelectionMode) {
+                binding.selectCheckBox.visibility = View.VISIBLE
+                binding.selectCheckBox.isChecked = selectedIds.contains(event.id)
+                binding.selectCheckBox.setOnClickListener {
+                    toggleSelection(event.id, position)
+                }
+            } else {
+                binding.selectCheckBox.visibility = View.GONE
+            }
+
+            // Carregamento de Thumbnail em RGB_565 para proteção de memória
             loadJob?.cancel()
             binding.thumbnailImageView.setImageDrawable(null)
 
-            // Carregamento assíncrono com subamostragem e RGB_565 para proteção de memória
             loadJob = CoroutineScope(Dispatchers.Main).launch {
                 val bitmap = withContext(Dispatchers.IO) {
-                    loadSubsampledBitmap(event.filePath, 144, 144)
+                    loadSubsampledBitmap(event.filePath, 150, 150)
                 }
                 if (bitmap != null) {
                     binding.thumbnailImageView.setImageBitmap(bitmap)

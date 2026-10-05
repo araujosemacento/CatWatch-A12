@@ -5,7 +5,7 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 
-@Database(entities = [CatEventEntity::class], version = 1, exportSchema = false)
+@Database(entities = [CatEventEntity::class], version = 2, exportSchema = false)
 abstract class CatWatchDatabase : RoomDatabase() {
     abstract fun catEventDao(): CatEventDao
 
@@ -19,7 +19,9 @@ abstract class CatWatchDatabase : RoomDatabase() {
                     context.applicationContext,
                     CatWatchDatabase::class.java,
                     "catwatch_database"
-                ).build()
+                )
+                    .fallbackToDestructiveMigration()
+                    .build()
                 INSTANCE = instance
                 instance
             }

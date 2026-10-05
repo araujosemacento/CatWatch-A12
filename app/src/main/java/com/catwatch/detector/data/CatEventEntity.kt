@@ -8,5 +8,7 @@ data class CatEventEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val timestamp: Long,
     val filePath: String,
-    val confidence: Float
+    val confidence: Float,
+    val eventType: String = "APPROACH", // "APPROACH" ou "DRINKING"
+    val isConfirmedDrinking: Boolean = false
 )

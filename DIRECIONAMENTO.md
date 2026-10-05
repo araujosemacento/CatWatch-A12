@@ -211,15 +211,29 @@ class CatDetectorAnalyzer(
 
 ---
 
-### 5.2. Gerenciador de Disparo e Cooldown (`CaptureCoordinator.kt`)
+### 5.2. Gerenciador de Disparo, Confirmação de Hidratação e Cooldown (`CaptureCoordinator.kt`)
+
+O disparo não depende de delays cegos. Adota-se a estratégia **Dual-Snapshot de Confirmação**:
+
+1. **$T_0$ (Aproximação Imediata):** Ao detectar felino ($\ge 0.60$), dispara imediatamente o snapshot de chegada (`CAT_APPROACH_...jpg`). Isso assegura que visitas rápidas nunca sejam perdidas.
+2. **Janela Ativa de 5s (Verificação de Permanência):** Inicia-se uma janela de monitoramento de 5 segundos. Se aos 5 segundos o analisador confirmar que o gato permanece na área da bacia, dispara-se o segundo snapshot (`CAT_DRINKING_...jpg`) e marca-se o evento como hidratação confirmada.
+3. **Armazenamento Público (`Pictures/CatWatch`):** Para facilitar a localização nos aplicativos nativos "Galeria" e "Meus Arquivos" do Galaxy A12, os arquivos são salvos no diretório público `Pictures/CatWatch` com notificação ao `MediaScannerConnection`.
+4. **Cooldown Pós-Evento:** Após o ciclo de aproximação/confirmação, aplica-se um cooldown de 20 a 30 segundos para evitar saturação de I/O enquanto o animal bebe confortavelmente.
 
 ```kotlin
 package com.catwatch.detector.core
 
 import android.content.Context
+import android.media.MediaScannerConnection
+import android.os.Environment
 import android.util.Log
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -230,30 +244,50 @@ class CaptureCoordinator(
     private val context: Context,
     private val imageCapture: ImageCapture,
     private val ioExecutor: ExecutorService,
-    private val onEventLogged: (File, Float) -> Unit
+    private val coroutineScope: CoroutineScope,
+    private val onEventLogged: (File, Float, String, Boolean) -> Unit
 ) {
-    private var lastCaptureTimestamp = 0L
-    private val cooldownDurationMs = 15_000L // 15 segundos entre eventos consecutivos
+    private var lastEventTimestamp = 0L
+    private val cooldownDurationMs = 25_000L
+    private val confirmationDelayMs = 5_000L
+    private var activeMonitoringJob: Job? = null
+    private var lastSeenConfidence = 0f
+    private var isCatPresent = false
 
     fun onCatCandidate(confidence: Float = 1.0f) {
         val now = System.currentTimeMillis()
-        if (now - lastCaptureTimestamp < cooldownDurationMs) {
-            // Animal ainda em cena ou evento duplicado recente
+        lastSeenConfidence = confidence
+        isCatPresent = true
+
+        if (now - lastEventTimestamp < cooldownDurationMs) {
             return
         }
 
-        lastCaptureTimestamp = now
-        executeSnapshot(confidence)
+        if (activeMonitoringJob == null || activeMonitoringJob?.isActive == false) {
+            lastEventTimestamp = now
+            // Disparo imediato T0 (Aproximação)
+            executeSnapshot("APPROACH", confidence, isConfirmed = false)
+
+            // Janela de confirmação de 5 segundos
+            activeMonitoringJob = coroutineScope.launch(Dispatchers.Default) {
+                isCatPresent = false
+                delay(confirmationDelayMs)
+                if (isCatPresent) {
+                    // Gato continuou presente: confirmação de hidratação
+                    executeSnapshot("DRINKING", lastSeenConfidence, isConfirmed = true)
+                }
+            }
+        }
     }
 
-    private fun executeSnapshot(confidence: Float) {
-        val storageDir = File(context.filesDir, "cat_events").apply {
-            if (!exists()) mkdirs()
-        }
+    private fun executeSnapshot(eventType: String, confidence: Float, isConfirmed: Boolean) {
+        val storageDir = File(
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES),
+            "CatWatch"
+        ).apply { if (!exists()) mkdirs() }
 
         val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
-        val photoFile = File(storageDir, "CAT_${timestamp}.jpg")
-
+        val photoFile = File(storageDir, "CAT_${eventType}_${timestamp}.jpg")
         val outputOptions = ImageCapture.OutputFileOptions.Builder(photoFile).build()
 
         imageCapture.takePicture(
@@ -261,8 +295,14 @@ class CaptureCoordinator(
             ioExecutor,
             object : ImageCapture.OnImageSavedCallback {
                 override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
-                    Log.i("CaptureCoordinator", "Snapshot gravado com sucesso: ${photoFile.absolutePath}")
-                    onEventLogged(photoFile, confidence)
+                    // Notifica o MediaStore da Samsung para indexar na Galeria e Meus Arquivos
+                    MediaScannerConnection.scanFile(
+                        context,
+                        arrayOf(photoFile.absolutePath),
+                        arrayOf("image/jpeg"),
+                        null
+                    )
+                    onEventLogged(photoFile, confidence, eventType, isConfirmed)
                 }
 
                 override fun onError(exception: ImageCaptureException) {
@@ -276,22 +316,65 @@ class CaptureCoordinator(
 
 ---
 
-### 5.3. Modelo de Dados de Auditoria (`CatEventEntity.kt`)
+### 5.3. Modelo de Dados de Auditoria (`CatEventEntity.kt` e DAO)
 
 ```kotlin
 package com.catwatch.detector.data
 
+import androidx.room.Dao
+import androidx.room.Delete
 import androidx.room.Entity
+import androidx.room.Insert
+import androidx.room.OnConflictStrategy
 import androidx.room.PrimaryKey
+import androidx.room.Query
+import kotlinx.coroutines.flow.Flow
 
 @Entity(tableName = "cat_events")
 data class CatEventEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val timestamp: Long,
     val filePath: String,
-    val confidence: Float
+    val confidence: Float,
+    val eventType: String = "APPROACH", // "APPROACH" ou "DRINKING"
+    val isConfirmedDrinking: Boolean = false
 )
+
+@Dao
+interface CatEventDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insert(event: CatEventEntity): Long
+
+    @Query("SELECT * FROM cat_events ORDER BY timestamp DESC")
+    fun getAllEventsPaged(): Flow<List<CatEventEntity>>
+
+    @Query("SELECT * FROM cat_events WHERE timestamp BETWEEN :startTime AND :endTime ORDER BY timestamp DESC")
+    fun getEventsByDateRange(startTime: Long, endTime: Long): Flow<List<CatEventEntity>>
+
+    @Delete
+    suspend fun deleteEvent(event: CatEventEntity)
+
+    @Query("DELETE FROM cat_events WHERE id IN (:ids)")
+    suspend fun deleteEventsByIds(ids: List<Long>)
+}
 ```
+
+---
+
+### 5.4. Interface, Visualização e Gerenciamento de Feed
+
+Para assegurar excelente usabilidade no acompanhamento do animal, o módulo de UI contempla:
+
+1. **Visualizador em Tela Cheia (*Fullscreen Dialog*):**
+   * Ao tocar em qualquer card do feed, abre-se uma visualização detalhada em alta resolução.
+   * Apresenta timestamp formatado, indicador de confiança do ML Kit e badge destacada (*"Aproximação"* vs *"Hidratação Confirmada"*).
+2. **Filtro Temporal Dinâmico:**
+   * Barra de filtros rápidos acima do feed: *"Hoje"*, *"Últimas 24h"*, *"Ontem"*, *"Todos"*.
+   * Seletor de calendário (*MaterialDatePicker*) para busca em intervalos de datas customizados.
+3. **Exclusão Manual (Individual e em Lote):**
+   * Exclusão individual por botão no card do item com diálogo de confirmação.
+   * Modo de seleção em lote (*Action Mode* / Toolbar contextual): ativa checkboxes em todos os cards, botão *"Selecionar Todos"* e botão de exclusão em massa.
+   * **Exclusão Sincronizada:** Ao excluir no banco Room, o arquivo `.jpg` correspondente no disco (`Pictures/CatWatch`) é deletado e o MediaScanner é atualizado para manter a Galeria e o armazenamento limpos.
 
 ---
 

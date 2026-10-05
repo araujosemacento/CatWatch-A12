@@ -1,14 +1,22 @@
 package com.catwatch.detector.ui
 
 import android.Manifest
+import android.app.Dialog
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Color
+import android.media.MediaScannerConnection
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.util.Size
+import android.view.View
+import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
@@ -16,15 +24,24 @@ import androidx.camera.core.ImageCapture
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.content.ContextCompat
+import androidx.core.util.Pair
 import androidx.lifecycle.lifecycleScope
 import com.catwatch.detector.camera.CatDetectorAnalyzer
 import com.catwatch.detector.core.CaptureCoordinator
 import com.catwatch.detector.data.CatEventEntity
 import com.catwatch.detector.data.CatWatchDatabase
 import com.catwatch.detector.databinding.ActivityMainBinding
+import com.catwatch.detector.databinding.DialogFullscreenImageBinding
+import com.google.android.material.datepicker.MaterialDatePicker
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Date
+import java.util.Locale
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
@@ -32,13 +49,16 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
     private lateinit var adapter: CatEventAdapter
-    private lateinit var database: CatWatchDatabase
+    private lateinit var repository: com.catwatch.detector.data.CatEventRepository
 
     private var imageCapture: ImageCapture? = null
     private var captureCoordinator: CaptureCoordinator? = null
 
     private lateinit var cameraExecutor: ExecutorService
     private lateinit var ioExecutor: ExecutorService
+
+    private var currentFilterJob: Job? = null
+    private val dateFormat = SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.getDefault())
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -59,18 +79,237 @@ class MainActivity : AppCompatActivity() {
         // Mantém tela ligada enquanto o app estiver no primeiro plano
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
-        database = CatWatchDatabase.getDatabase(this)
+        val database = CatWatchDatabase.getDatabase(this)
+        repository = com.catwatch.detector.data.CatEventRepository(this, database.catEventDao())
+        
         cameraExecutor = Executors.newSingleThreadExecutor()
         ioExecutor = Executors.newSingleThreadExecutor()
 
         setupRecyclerView()
+        setupToolbars()
+        setupFilterChips()
         checkAndRequestPermissions()
-        loadEventsFromDatabase()
+
+        // Inicia carregando todos os eventos
+        applyFilterAll()
     }
 
     private fun setupRecyclerView() {
         adapter = CatEventAdapter()
         binding.eventsRecyclerView.adapter = adapter
+
+        adapter.onItemClick = { event ->
+            showFullscreenDialog(event)
+        }
+
+        adapter.onSelectionChanged = { selectedCount ->
+            binding.selectionCountTextView.text = "$selectedCount selecionados"
+            binding.deleteSelectedButton.isEnabled = selectedCount > 0
+        }
+    }
+
+    private fun setupToolbars() {
+        binding.selectModeButton.setOnClickListener {
+            enterSelectionMode()
+        }
+
+        binding.cancelSelectionButton.setOnClickListener {
+            exitSelectionMode()
+        }
+
+        binding.selectAllButton.setOnClickListener {
+            adapter.selectAll()
+        }
+
+        binding.deleteSelectedButton.setOnClickListener {
+            confirmBatchDeletion()
+        }
+    }
+
+    private fun enterSelectionMode() {
+        adapter.setSelectionMode(true)
+        binding.normalToolbar.visibility = View.GONE
+        binding.selectionToolbar.visibility = View.VISIBLE
+    }
+
+    private fun exitSelectionMode() {
+        adapter.setSelectionMode(false)
+        binding.selectionToolbar.visibility = View.GONE
+        binding.normalToolbar.visibility = View.VISIBLE
+    }
+
+    private fun confirmBatchDeletion() {
+        val selectedItems = adapter.getSelectedItems()
+        if (selectedItems.isEmpty()) return
+
+        AlertDialog.Builder(this)
+            .setTitle("Excluir Fotos")
+            .setMessage("Deseja excluir permanentemente ${selectedItems.size} fotos selecionadas do banco e do disco?")
+            .setPositiveButton("Excluir") { _, _ ->
+                executeBatchDeletion(selectedItems)
+            }
+            .setNegativeButton("Cancelar", null)
+            .show()
+    }
+
+    private fun executeBatchDeletion(items: List<CatEventEntity>) {
+        lifecycleScope.launch {
+            repository.deleteEventsBatch(items)
+            Toast.makeText(this@MainActivity, "${items.size} fotos excluídas com sucesso.", Toast.LENGTH_SHORT).show()
+            exitSelectionMode()
+        }
+    }
+
+    private fun setupFilterChips() {
+        binding.chipAll.setOnClickListener { applyFilterAll() }
+        binding.chipToday.setOnClickListener { applyFilterToday() }
+        binding.chip24h.setOnClickListener { applyFilter24h() }
+        binding.chipYesterday.setOnClickListener { applyFilterYesterday() }
+        binding.chipCustomRange.setOnClickListener { openDateRangePicker() }
+    }
+
+    private fun applyFilterAll() {
+        currentFilterJob?.cancel()
+        currentFilterJob = lifecycleScope.launch {
+            repository.getAllEvents().collect { events ->
+                updateFeed(events)
+            }
+        }
+    }
+
+    private fun applyFilterToday() {
+        currentFilterJob?.cancel()
+        currentFilterJob = lifecycleScope.launch {
+            repository.getEventsToday().collect { events ->
+                updateFeed(events)
+            }
+        }
+    }
+
+    private fun applyFilter24h() {
+        currentFilterJob?.cancel()
+        currentFilterJob = lifecycleScope.launch {
+            repository.getEventsLast24h().collect { events ->
+                updateFeed(events)
+            }
+        }
+    }
+
+    private fun applyFilterYesterday() {
+        currentFilterJob?.cancel()
+        currentFilterJob = lifecycleScope.launch {
+            repository.getEventsYesterday().collect { events ->
+                updateFeed(events)
+            }
+        }
+    }
+
+    private fun openDateRangePicker() {
+        val picker = MaterialDatePicker.Builder.dateRangePicker()
+            .setTitleText("Selecione o Intervalo")
+            .build()
+
+        picker.addOnPositiveButtonClickListener { selection: Pair<Long, Long>? ->
+            if (selection != null) {
+                val start = selection.first ?: return@addOnPositiveButtonClickListener
+                // Adiciona o final do dia de término (23:59:59)
+                val end = (selection.second ?: start) + (24 * 60 * 60 * 1000L - 1)
+
+                currentFilterJob?.cancel()
+                currentFilterJob = lifecycleScope.launch {
+                    repository.getEventsByRange(start, end).collect { events ->
+                        updateFeed(events)
+                    }
+                }
+            }
+        }
+
+        picker.show(supportFragmentManager, "DATE_RANGE_PICKER")
+    }
+
+    private fun updateFeed(events: List<CatEventEntity>) {
+        adapter.submitList(events)
+        binding.feedTitleTextView.text = "Detecções (${events.size})"
+        binding.emptyStateTextView.visibility = if (events.isEmpty()) View.VISIBLE else View.GONE
+    }
+
+    private fun showFullscreenDialog(event: CatEventEntity) {
+        val dialog = Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen)
+        val dialogBinding = DialogFullscreenImageBinding.inflate(layoutInflater)
+        dialog.setContentView(dialogBinding.root)
+
+        // Metadados
+        dialogBinding.dialogTimestamp.text = "📅 ${dateFormat.format(Date(event.timestamp))}"
+        dialogBinding.dialogConfidence.text = "🎯 Confiança ML Kit: %.1f%%".format(event.confidence * 100)
+        dialogBinding.dialogFilePath.text = "📁 ${event.filePath}"
+
+        if (event.isConfirmedDrinking || event.eventType == "DRINKING") {
+            dialogBinding.dialogStatusBadge.text = "💧 Hidratação Confirmada"
+            dialogBinding.dialogStatusBadge.setBackgroundColor(Color.parseColor("#2E7D32"))
+        } else {
+            dialogBinding.dialogStatusBadge.text = "🐾 Aproximação"
+            dialogBinding.dialogStatusBadge.setBackgroundColor(Color.parseColor("#1565C0"))
+        }
+
+        // Carrega imagem em alta resolução
+        lifecycleScope.launch(Dispatchers.IO) {
+            val bitmap = loadHighResBitmap(event.filePath, 1080, 1080)
+            withContext(Dispatchers.Main) {
+                if (bitmap != null) {
+                    dialogBinding.dialogFullImageView.setImageBitmap(bitmap)
+                } else {
+                    dialogBinding.dialogFullImageView.setImageResource(android.R.drawable.ic_menu_camera)
+                }
+            }
+        }
+
+        dialogBinding.dialogCloseButton.setOnClickListener {
+            dialog.dismiss()
+        }
+
+        dialogBinding.dialogDeleteButton.setOnClickListener {
+            AlertDialog.Builder(this)
+                .setTitle("Excluir Registro")
+                .setMessage("Deseja excluir permanentemente este registro?")
+                .setPositiveButton("Excluir") { _, _ ->
+                    lifecycleScope.launch {
+                        repository.deleteEvent(event)
+                        Toast.makeText(this@MainActivity, "Registro excluído.", Toast.LENGTH_SHORT).show()
+                        dialog.dismiss()
+                    }
+                }
+                .setNegativeButton("Cancelar", null)
+                .show()
+        }
+
+        dialog.show()
+    }
+
+    private fun loadHighResBitmap(path: String, reqWidth: Int, reqHeight: Int): Bitmap? {
+        val file = File(path)
+        if (!file.exists()) return null
+
+        return try {
+            val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeFile(path, options)
+
+            var inSampleSize = 1
+            if (options.outHeight > reqHeight || options.outWidth > reqWidth) {
+                val halfHeight = options.outHeight / 2
+                val halfWidth = options.outWidth / 2
+                while (halfHeight / inSampleSize >= reqHeight && halfWidth / inSampleSize >= reqWidth) {
+                    inSampleSize *= 2
+                }
+            }
+
+            val decodeOptions = BitmapFactory.Options().apply {
+                this.inSampleSize = inSampleSize
+                inPreferredConfig = Bitmap.Config.RGB_565
+            }
+            BitmapFactory.decodeFile(path, decodeOptions)
+        } catch (e: Exception) {
+            null
+        }
     }
 
     private fun checkAndRequestPermissions() {
@@ -107,20 +346,23 @@ class MainActivity : AppCompatActivity() {
                 .build()
             imageCapture = capture
 
-            // 3. CaptureCoordinator para gerenciar o cooldown e salvar em disco
+            // 3. CaptureCoordinator para gerenciar o Dual-Snapshot, cooldown e salvar na Galeria
             val coordinator = CaptureCoordinator(
                 context = applicationContext,
                 imageCapture = capture,
                 ioExecutor = ioExecutor,
-                onEventLogged = { photoFile, confidence ->
+                coroutineScope = lifecycleScope,
+                onEventLogged = { filePath, confidence, eventType, isConfirmed ->
                     val event = CatEventEntity(
                         timestamp = System.currentTimeMillis(),
-                        filePath = photoFile.absolutePath,
-                        confidence = confidence
+                        filePath = filePath,
+                        confidence = confidence,
+                        eventType = eventType,
+                        isConfirmedDrinking = isConfirmed
                     )
                     lifecycleScope.launch(Dispatchers.IO) {
+                        val database = CatWatchDatabase.getDatabase(applicationContext)
                         database.catEventDao().insert(event)
-                        loadEventsFromDatabase()
                     }
                 }
             )
@@ -159,15 +401,6 @@ class MainActivity : AppCompatActivity() {
             }
 
         }, ContextCompat.getMainExecutor(this))
-    }
-
-    private fun loadEventsFromDatabase() {
-        lifecycleScope.launch(Dispatchers.IO) {
-            val events = database.catEventDao().getAllEventsPaged(limit = 100, offset = 0)
-            withContext(Dispatchers.Main) {
-                adapter.submitList(events)
-            }
-        }
     }
 
     override fun onDestroy() {

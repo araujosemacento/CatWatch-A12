@@ -28,8 +28,9 @@ Antes de propor alterações ou gerar novos componentes, os agentes **devem cons
 | **Fluxo e Arquitetura** | [§ 3. Arquitetura do Sistema](file:///home/melo/Documentos/GitHub/CatWatch-A12/DIRECIONAMENTO.md#3-arquitetura-do-sistema) | Diagrama de fluxo: Stream $\rightarrow$ Dual Use Cases $\rightarrow$ Analyzer $\rightarrow$ Cooldown $\rightarrow$ Snapshot. |
 | **Stack e Dependências** | [§ 4. Stack Tecnológica](file:///home/melo/Documentos/GitHub/CatWatch-A12/DIRECIONAMENTO.md#4-stack-tecnologica-e-dependencias) | Java 17 LTS, Kotlin 1.9+, CameraX 1.3.1, ML Kit Image Labeling 17.0.9, Room 2.6.1 + KSP. |
 | **Lógica de Visão Computacional** | [§ 5.1. CatDetectorAnalyzer](file:///home/melo/Documentos/GitHub/CatWatch-A12/DIRECIONAMENTO.md#51-analisador-com-subamostragem-e-filtro-semantico-catdetectoranalyzerkt) | Filtro semântico para "Cat", "Kitten", "Felidae" com confiança $\ge 0.60$. |
-| **Disparo e Anti-Duplicação** | [§ 5.2. CaptureCoordinator](file:///home/melo/Documentos/GitHub/CatWatch-A12/DIRECIONAMENTO.md#52-gerenciador-de-disparo-e-cooldown-capturecoordinatorkt) | Cooldown configurável (15s a 45s) entre disparos consecutivos para o mesmo animal. |
-| **Persistência de Metadados** | [§ 5.3. CatEventEntity](file:///home/melo/Documentos/GitHub/CatWatch-A12/DIRECIONAMENTO.md#53-modelo-de-dados-de-auditoria-catevententitykt) | Tabela `cat_events` no Room com timestamp, caminho da foto e confiança. |
+| **Disparo e Anti-Duplicação** | [§ 5.2. CaptureCoordinator](file:///home/melo/Documentos/GitHub/CatWatch-A12/DIRECIONAMENTO.md#52-gerenciador-de-disparo-confirmacao-de-hidratacao-e-cooldown-capturecoordinatorkt) | Dual-Snapshot (T0 aproximação + T5 confirmação com janela de 5s), gravação em `Pictures/CatWatch` e scan de mídia. |
+| **Persistência de Metadados** | [§ 5.3. CatEventEntity](file:///home/melo/Documentos/GitHub/CatWatch-A12/DIRECIONAMENTO.md#53-modelo-de-dados-de-auditoria-catevententitykt-e-dao) | Tabela `cat_events` com flags de hidratação, consultas por range temporal e deleção em lote. |
+| **Gestão de Feed e UI** | [§ 5.4. Interface e Gerenciamento](file:///home/melo/Documentos/GitHub/CatWatch-A12/DIRECIONAMENTO.md#54-interface-visualizacao-e-gerenciamento-de-feed) | Modal em tela cheia, filtros rápidos e DatePicker, modo de seleção múltipla e exclusão sincronizada (Room + disco). |
 | **Manifesto e Permissões** | [§ 6. Permissões e Manifesto](file:///home/melo/Documentos/GitHub/CatWatch-A12/DIRECIONAMENTO.md#6-configuracoes-de-permissoes-e-manifesto) | Câmera, WakeLock, Foreground Service Camera e Notificações. |
 | **Operação no Galaxy A12** | [§ 7. Instruções no Aparelho](file:///home/melo/Documentos/GitHub/CatWatch-A12/DIRECIONAMENTO.md#7-instrucoes-operacionais-no-aparelho-galaxy-a12) | Bloqueio de carga em 85%, bateria irrestrita na One UI, tela no brilho mínimo. |
 
@@ -37,7 +38,7 @@ Antes de propor alterações ou gerar novos componentes, os agentes **devem cons
 
 ## 3. Roadmap de Desenvolvimento do Projeto
 
-O desenvolvimento deve ser executado de forma incremental seguindo as 5 fases estruturadas abaixo:
+O desenvolvimento deve ser executado de forma incremental seguindo as fases estruturadas abaixo:
 
 ```mermaid
 flowchart TD
@@ -45,7 +46,8 @@ flowchart TD
     F1 --> F2[Fase 2: Persistência & Cooldown]
     F2 --> F3[Fase 3: Pipeline de Visão CameraX + ML Kit]
     F3 --> F4[Fase 4: UI de Monitoramento & Ciclo de Vida]
-    F4 --> F5[Fase 5: Testes de Soak 24/7 & Calibração Térmica]
+    F4 --> F41[Fase 4.1: Gestão de Mídia, Filtros & Confirmação de Hidratação]
+    F41 --> F5[Fase 5: Testes de Soak 24/7 & Calibração Térmica]
 ```
 
 ### Fase 0: Preparação de Ambiente & Hardware
@@ -98,6 +100,21 @@ flowchart TD
 * [x] Implementar fluxo de permissões dinâmicas em tempo de execução para Câmera e Notificações.
 * [x] Vincular CameraX ao ciclo de vida da `MainActivity` (`ProcessCameraProvider`).
 * **Gate de Aceite:** App inicia a câmera, exibe a imagem e atualiza a lista instantaneamente ao detectar um gato. (CONCLUÍDO)
+
+### Fase 4.1: Gestão de Mídia, Filtros Temporais e Confirmação de Hidratação
+
+* [x] Atualizar `CaptureCoordinator` para estratégia Dual-Snapshot:
+  * $T_0$: Foto imediata de aproximação (`APPROACH`).
+  * $T_5$: Foto de confirmação de hidratação (`DRINKING`) caso o animal permaneça na vasilha por 5 segundos.
+  * Migrar salvamento para diretório público `Pictures/CatWatch` com notificação ao `MediaScannerConnection` (visível na Galeria da Samsung e Meus Arquivos).
+* [x] Atualizar `CatEventEntity` e `CatEventDao`:
+  * Suporte aos novos campos (`eventType`, `isConfirmedDrinking`).
+  * Consultas por período de datas (`getEventsByDateRange`).
+  * Exclusão individual e em lote (`deleteEventsByIds`).
+* [x] Criar visualizador de imagem em tela cheia (*Fullscreen Dialog* com detalhes de confiança e horário).
+* [x] Implementar barra de filtros temporais (chips: *Hoje*, *24h*, *Ontem*, *Todos* e *MaterialDatePicker* para intervalo customizado).
+* [x] Implementar modo de seleção em lote com exclusão atômica (remoção no SQLite/Room + exclusão do arquivo `.jpg` do disco).
+* **Gate de Aceite:** Usuário visualiza fotos em tamanho real, filtra o histórico por datas, seleciona e exclui fotos individualmente ou em lote (sincronizando disco e banco), e encontra as fotos na Galeria nativa. (CONCLUÍDO)
 
 ### Fase 5: Operação 24/7 e Homologação no Galaxy A12
 

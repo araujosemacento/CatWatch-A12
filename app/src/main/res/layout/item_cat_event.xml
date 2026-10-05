@@ -17,15 +17,27 @@
         android:layout_height="wrap_content"
         android:padding="8dp">
 
-        <ImageView
-            android:id="@+id/thumbnailImageView"
-            android:layout_width="72dp"
-            android:layout_height="72dp"
-            android:contentDescription="@string/app_name"
-            android:scaleType="centerCrop"
-            android:background="#2A2A2A"
+        <!-- Checkbox para Modo de Seleção Múltipla -->
+        <CheckBox
+            android:id="@+id/selectCheckBox"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:visibility="gone"
+            app:buttonTint="#81C784"
             app:layout_constraintBottom_toBottomOf="parent"
             app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toTopOf="parent"
+            tools:visibility="visible" />
+
+        <ImageView
+            android:id="@+id/thumbnailImageView"
+            android:layout_width="76dp"
+            android:layout_height="76dp"
+            android:background="#2A2A2A"
+            android:contentDescription="@string/app_name"
+            android:scaleType="centerCrop"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintStart_toEndOf="@id/selectCheckBox"
             app:layout_constraintTop_toTopOf="parent"
             tools:srcCompat="@android:drawable/ic_menu_camera" />
 
@@ -35,12 +47,27 @@
             android:layout_height="wrap_content"
             android:layout_marginStart="12dp"
             android:textColor="#FFFFFF"
-            android:textSize="15sp"
+            android:textSize="14sp"
             android:textStyle="bold"
-            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintEnd_toStartOf="@id/statusBadgeTextView"
             app:layout_constraintStart_toEndOf="@id/thumbnailImageView"
             app:layout_constraintTop_toTopOf="@id/thumbnailImageView"
-            tools:text="2026-10-04 23:15:30" />
+            tools:text="05/10/2026 01:15:30" />
+
+        <!-- Badge de Status: Hidratação ou Aproximação -->
+        <TextView
+            android:id="@+id/statusBadgeTextView"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="#2E7D32"
+            android:paddingHorizontal="6dp"
+            android:paddingVertical="2dp"
+            android:textColor="#FFFFFF"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintTop_toTopOf="@id/thumbnailImageView"
+            tools:text="💧 Bebendo" />
 
         <TextView
             android:id="@+id/confidenceTextView"
@@ -69,7 +96,7 @@
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintStart_toEndOf="@id/thumbnailImageView"
             app:layout_constraintTop_toBottomOf="@id/confidenceTextView"
-            tools:text="CAT_20261004_231530.jpg" />
+            tools:text="CAT_DRINKING_20261005_011530.jpg" />
 
     </androidx.constraintlayout.widget.ConstraintLayout>
 </com.google.android.material.card.MaterialCardView>
