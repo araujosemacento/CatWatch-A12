@@ -61,14 +61,14 @@ flowchart TD
 
 ### Fase 1: Fundação e Harness Gradle
 
-* [ ] Configurar `settings.gradle.kts` e `build.gradle.kts` na raiz do repositório.
-* [ ] Configurar `app/build.gradle.kts` com:
+* [x] Configurar `settings.gradle.kts` e `build.gradle.kts` na raiz do repositório.
+* [x] Configurar `app/build.gradle.kts` com:
   * Suporte a Java 17 (`sourceCompatibility`, `targetCompatibility`, `jvmTarget = "17"`).
   * Plugins: `com.android.application`, `org.jetbrains.kotlin.android`, `com.google.devtools.ksp`.
   * Dependências especificadas em [§ 4 de DIRECIONAMENTO.md](file:///home/melo/Documentos/GitHub/CatWatch-A12/DIRECIONAMENTO.md#4-stack-tecnologica-e-dependencias).
-* [ ] Configurar `gradle.properties` com limites de memória controlados (`-Xmx2048m`).
-* [ ] Criar estrutura de pacotes: `com.catwatch.detector` (`camera`, `core`, `data`, `ui`).
-* **Gate de Aceite:** `./gradlew assembleDebug` compila sem erros ou avisos críticos.
+* [x] Configurar `gradle.properties` com limites de memória controlados (`-Xmx2048m`).
+* [x] Criar estrutura de pacotes: `com.catwatch.detector` (`camera`, `core`, `data`, `ui`).
+* **Gate de Aceite:** `./gradlew assembleDebug` compila sem erros ou avisos críticos. (CONCLUÍDO)
 
 ### Fase 2: Persistência e Coordenação de Disparos
 
