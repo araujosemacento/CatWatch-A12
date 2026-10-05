@@ -1,0 +1,84 @@
+name: Build & Release CatWatch A12
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  # 1. Validação de Testes Unitários
+  test:
+    name: Run Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+          cache: 'gradle'
+
+      - name: Grant Execute Permission for Gradlew
+        run: chmod +x gradlew
+
+      - name: Execute Unit Tests
+        run: ./gradlew test --stacktrace
+
+  # 2. Compilação e Geração de Pacotes (APK Release e Debug)
+  build:
+    name: Build & Package APKs
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+          cache: 'gradle'
+
+      - name: Grant Execute Permission for Gradlew
+        run: chmod +x gradlew
+
+      - name: Build Release and Debug APKs
+        run: ./gradlew assembleRelease assembleDebug --stacktrace
+
+      - name: Rename APKs for Clarity
+        run: |
+          mkdir -p dist/
+          cp app/build/outputs/apk/release/app-release.apk dist/CatWatch-A12-release.apk
+          cp app/build/outputs/apk/debug/app-debug.apk dist/CatWatch-A12-debug.apk
+
+      - name: Upload Build Artifacts (Packages)
+        uses: actions/upload-artifact@v4
+        with:
+          name: CatWatch-A12-APKs
+          path: dist/*.apk
+          retention-days: 30
+
+      # 3. Criação de Release Automática quando uma tag v* for enviada
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/CatWatch-A12-release.apk
+            dist/CatWatch-A12-debug.apk
+          generate_release_notes: true
+          draft: false
+          prerelease: false
