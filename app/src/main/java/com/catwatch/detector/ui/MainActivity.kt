@@ -3,6 +3,7 @@ package com.catwatch.detector.ui
 import android.Manifest
 import android.app.Dialog
 import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Color
@@ -56,11 +57,15 @@ class MainActivity : AppCompatActivity() {
 
     private var imageCapture: ImageCapture? = null
     private var captureCoordinator: CaptureCoordinator? = null
+    private var detectorAnalyzer: CatDetectorAnalyzer? = null
+
+    private var currentCameraProvider: ProcessCameraProvider? = null
+    private var isCameraActive: Boolean = false
+    private var isStickyModeEnabled: Boolean = true
+    private var reposeTranslationY: Float = 0f
 
     private lateinit var cameraExecutor: ExecutorService
     private lateinit var ioExecutor: ExecutorService
-
-    private val dateFormat = SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.getDefault())
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -84,12 +89,25 @@ class MainActivity : AppCompatActivity() {
         cameraExecutor = Executors.newSingleThreadExecutor()
         ioExecutor = Executors.newSingleThreadExecutor()
 
+        setupSlidingPanel()
         setupRecyclerView()
         setupToolbars()
         setupFilterChips()
         checkAndRequestPermissions()
 
         observeViewModel()
+    }
+
+    private fun setupSlidingPanel() {
+        val isPortrait = resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT
+        if (!isPortrait) return
+
+        binding.root.post {
+            val totalHeight = binding.root.height.toFloat()
+            // Em repouso (45%), o topo do painel ancorado em 20% translada +25% da altura
+            reposeTranslationY = totalHeight * 0.25f
+            binding.feedPanel.translationY = reposeTranslationY
+        }
     }
 
     private fun observeViewModel() {
@@ -104,8 +122,65 @@ class MainActivity : AppCompatActivity() {
         adapter = CatEventAdapter()
         binding.eventsRecyclerView.adapter = adapter
 
+        val layoutManager = binding.eventsRecyclerView.layoutManager as androidx.recyclerview.widget.LinearLayoutManager
+
+        binding.eventsRecyclerView.addOnScrollListener(object : androidx.recyclerview.widget.RecyclerView.OnScrollListener() {
+            override fun onScrolled(recyclerView: androidx.recyclerview.widget.RecyclerView, dx: Int, dy: Int) {
+                super.onScrolled(recyclerView, dx, dy)
+                val isPortrait = resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT
+                val firstVisibleItem = layoutManager.findFirstVisibleItemPosition()
+
+                if (dy > 0) {
+                    // Rolagem para baixo: expande o painel para modo galeria (80%) com zero-jank
+                    if (isPortrait && binding.feedPanel.translationY > 0f) {
+                        binding.feedPanel.animate().translationY(0f).setDuration(250).start()
+                    }
+                    isStickyModeEnabled = false
+                    binding.fabContainer.visibility = View.VISIBLE
+                } else if (dy < 0) {
+                    // Rolagem para cima: ao atingir o topo, retorna ao modo painel de repouso (45%)
+                    if (firstVisibleItem == 0) {
+                        if (isPortrait && binding.feedPanel.translationY < reposeTranslationY) {
+                            binding.feedPanel.animate().translationY(reposeTranslationY).setDuration(250).start()
+                        }
+                        isStickyModeEnabled = true
+                        binding.fabContainer.visibility = View.GONE
+                        binding.fabNewItemsBadge.visibility = View.GONE
+                    }
+                }
+            }
+        })
+
+        binding.fabScrollToTop.setOnClickListener {
+            binding.eventsRecyclerView.smoothScrollToPosition(0)
+            val isPortrait = resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT
+            if (isPortrait) {
+                binding.feedPanel.animate().translationY(reposeTranslationY).setDuration(250).start()
+            }
+            isStickyModeEnabled = true
+            binding.fabContainer.visibility = View.GONE
+            binding.fabNewItemsBadge.visibility = View.GONE
+        }
+
+        adapter.registerAdapterDataObserver(object : androidx.recyclerview.widget.RecyclerView.AdapterDataObserver() {
+            override fun onItemRangeInserted(positionStart: Int, itemCount: Int) {
+                if (positionStart == 0) {
+                    if (isStickyModeEnabled && layoutManager.findFirstVisibleItemPosition() <= 0) {
+                        binding.eventsRecyclerView.scrollToPosition(0)
+                    } else {
+                        binding.fabContainer.visibility = View.VISIBLE
+                        binding.fabNewItemsBadge.visibility = View.VISIBLE
+                        pulseBadge()
+                    }
+                }
+            }
+        })
+
         adapter.onItemClick = { event ->
-            showFullscreenDialog(event)
+            val session = viewModel.getChainedSessionForEvent(event)
+            CatEventDetailDialogFragment.show(supportFragmentManager, session, event) { evt, onComplete ->
+                viewModel.deleteEvent(evt, onComplete)
+            }
         }
 
         adapter.onSelectionChanged = { selectedCount ->
@@ -130,6 +205,39 @@ class MainActivity : AppCompatActivity() {
         binding.deleteSelectedButton.setOnClickListener {
             confirmBatchDeletion()
         }
+
+        // Configuração do seletor operacional de 3 estados
+        binding.cameraModeToggleGroup.check(R.id.btnModeMonitor)
+        binding.cameraModeToggleGroup.addOnButtonCheckedListener { _, checkedId, isChecked ->
+            if (!isChecked) return@addOnButtonCheckedListener
+            when (checkedId) {
+                R.id.btnModeOff -> {
+                    detectorAnalyzer?.isAnalysisEnabled = false
+                    currentCameraProvider?.unbindAll()
+                    isCameraActive = false
+                    Toast.makeText(this, "Câmera desativada (Standby).", Toast.LENGTH_SHORT).show()
+                }
+                R.id.btnModeFrame -> {
+                    detectorAnalyzer?.isAnalysisEnabled = false
+                    if (!isCameraActive) {
+                        startCamera()
+                    }
+                    Toast.makeText(this, "Modo Enquadrar ativo (sem inferência de IA).", Toast.LENGTH_SHORT).show()
+                }
+                R.id.btnModeMonitor -> {
+                    detectorAnalyzer?.isAnalysisEnabled = true
+                    if (!isCameraActive) {
+                        startCamera()
+                    }
+                    Toast.makeText(this, "Modo Monitoramento 24/7 ativo.", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    private fun pulseBadge() {
+        val pulseAnimation = android.view.animation.AnimationUtils.loadAnimation(this, R.anim.pulse)
+        binding.fabNewItemsBadge.startAnimation(pulseAnimation)
     }
 
     private fun enterSelectionMode() {
@@ -213,85 +321,7 @@ class MainActivity : AppCompatActivity() {
         binding.emptyStateTextView.visibility = if (events.isEmpty()) View.VISIBLE else View.GONE
     }
 
-    private fun showFullscreenDialog(event: CatEventEntity) {
-        val dialog = Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen)
-        val dialogBinding = DialogFullscreenImageBinding.inflate(layoutInflater)
-        dialog.setContentView(dialogBinding.root)
-
-        // Metadados (sem emojis)
-        dialogBinding.dialogTimestamp.text = "Data/Hora: ${dateFormat.format(Date(event.timestamp))}"
-        dialogBinding.dialogConfidence.text = "Confiança: %.1f%%".format(event.confidence * 100)
-        dialogBinding.dialogFilePath.text = "Arquivo: ${event.filePath}"
-
-        if (event.isConfirmedDrinking || event.eventType == "DRINKING") {
-            dialogBinding.dialogStatusBadge.text = "Hidratação Confirmada"
-            dialogBinding.dialogStatusBadge.setBackgroundResource(R.drawable.bg_badge_drinking)
-            dialogBinding.dialogStatusBadge.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_water_drop, 0, 0, 0)
-        } else {
-            dialogBinding.dialogStatusBadge.text = "Aproximação"
-            dialogBinding.dialogStatusBadge.setBackgroundResource(R.drawable.bg_badge_approach)
-            dialogBinding.dialogStatusBadge.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_visibility, 0, 0, 0)
-        }
-
-        // Carrega imagem em alta resolução
-        lifecycleScope.launch(Dispatchers.IO) {
-            val bitmap = loadHighResBitmap(event.filePath, 1080, 1080)
-            withContext(Dispatchers.Main) {
-                if (bitmap != null) {
-                    dialogBinding.dialogFullImageView.setImageBitmap(bitmap)
-                } else {
-                    dialogBinding.dialogFullImageView.setImageResource(android.R.drawable.ic_menu_camera)
-                }
-            }
-        }
-
-        dialogBinding.dialogCloseButton.setOnClickListener {
-            dialog.dismiss()
-        }
-
-        dialogBinding.dialogDeleteButton.setOnClickListener {
-            AlertDialog.Builder(this)
-                .setTitle("Excluir Registro")
-                .setMessage("Deseja excluir permanentemente este registro?")
-                .setPositiveButton("Excluir") { _, _ ->
-                    viewModel.deleteEvent(event) {
-                        Toast.makeText(this@MainActivity, "Registro excluído.", Toast.LENGTH_SHORT).show()
-                        dialog.dismiss()
-                    }
-                }
-                .setNegativeButton("Cancelar", null)
-                .show()
-        }
-
-        dialog.show()
-    }
-
-    private fun loadHighResBitmap(path: String, reqWidth: Int, reqHeight: Int): Bitmap? {
-        val file = File(path)
-        if (!file.exists()) return null
-
-        return try {
-            val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            BitmapFactory.decodeFile(path, options)
-
-            var inSampleSize = 1
-            if (options.outHeight > reqHeight || options.outWidth > reqWidth) {
-                val halfHeight = options.outHeight / 2
-                val halfWidth = options.outWidth / 2
-                while (halfHeight / inSampleSize >= reqHeight && halfWidth / inSampleSize >= reqWidth) {
-                    inSampleSize *= 2
-                }
-            }
-
-            val decodeOptions = BitmapFactory.Options().apply {
-                this.inSampleSize = inSampleSize
-                inPreferredConfig = Bitmap.Config.RGB_565
-            }
-            BitmapFactory.decodeFile(path, decodeOptions)
-        } catch (e: Exception) {
-            null
-        }
-    }
+    // As lógicas de display e carragamento de imagem foram extraídas para CatEventDetailDialog e ImageUtils
 
     private fun checkAndRequestPermissions() {
         val permissionsToRequest = mutableListOf(Manifest.permission.CAMERA)
@@ -315,15 +345,18 @@ class MainActivity : AppCompatActivity() {
 
         cameraProviderFuture.addListener({
             val cameraProvider = cameraProviderFuture.get()
+            currentCameraProvider = cameraProvider
 
             // 1. Preview vinculado ao ViewFinder (modo compatível)
             val preview = Preview.Builder().build().also {
                 it.setSurfaceProvider(binding.viewFinder.surfaceProvider)
             }
 
-            // 2. ImageCapture configurado para fotos sob demanda
+            // 2. ImageCapture configurado para fotos sob demanda com compressão de 80% e resolução 720p
             val capture = ImageCapture.Builder()
                 .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+                .setTargetResolution(Size(1280, 720))
+                .setJpegQuality(80)
                 .build()
             imageCapture = capture
 
@@ -358,6 +391,11 @@ class MainActivity : AppCompatActivity() {
                     coordinator.onCatCandidate(confidence)
                 }
             )
+            detectorAnalyzer = analyzer
+
+            // Define se a IA processa com base no modo selecionado (Enquadrar vs Monitorar)
+            val currentMode = binding.cameraModeToggleGroup.checkedButtonId
+            analyzer.isAnalysisEnabled = (currentMode == R.id.btnModeMonitor)
 
             imageAnalysis.setAnalyzer(cameraExecutor, analyzer)
 
@@ -373,8 +411,10 @@ class MainActivity : AppCompatActivity() {
                     imageAnalysis,
                     capture
                 )
+                isCameraActive = true
                 Log.i("MainActivity", "CameraX inicializado e vinculado ao ciclo de vida com sucesso.")
             } catch (exc: Exception) {
+                isCameraActive = false
                 Log.e("MainActivity", "Falha ao vincular casos de uso da CameraX", exc)
             }
 

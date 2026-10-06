@@ -28,18 +28,32 @@
                 android:layout_height="wrap_content"
                 android:layout_marginBottom="12dp">
 
-                <TextView
-                    android:id="@+id/dialogTitle"
+                <LinearLayout
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_alignParentStart="true"
                     android:layout_centerVertical="true"
                     android:layout_toStartOf="@id/dialogCloseButton"
-                    android:layout_marginEnd="8dp"
-                    android:text="Detalhes do Registro"
-                    android:textColor="#FFFFFF"
-                    android:textSize="18sp"
-                    android:textStyle="bold" />
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:id="@+id/dialogTitle"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Sessão de Hidratação"
+                        android:textColor="#FFFFFF"
+                        android:textSize="17sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/dialogSessionCounter"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:textColor="#81C784"
+                        android:textSize="12sp"
+                        tools:text="Foto 1 de 2 • Deslize para ver a sequência" />
+                </LinearLayout>
 
                 <ImageButton
                     android:id="@+id/dialogCloseButton"
@@ -53,48 +67,18 @@
                     app:tint="#CCCCCC" />
             </RelativeLayout>
 
-            <!-- Imagem em Alta Resolução -->
-            <com.google.android.material.card.MaterialCardView
+            <!-- Carrossel ViewPager2 da Sessão -->
+            <androidx.viewpager2.widget.ViewPager2
+                android:id="@+id/sessionViewPager"
                 android:layout_width="match_parent"
-                android:layout_height="280dp"
-                app:cardBackgroundColor="#0D0D0D"
-                app:cardCornerRadius="12dp"
-                app:cardElevation="0dp"
-                app:strokeColor="#2A2A2A"
-                app:strokeWidth="1dp">
+                android:layout_height="280dp" />
 
-                <ImageView
-                    android:id="@+id/dialogFullImageView"
-                    android:layout_width="match_parent"
-                    android:layout_height="match_parent"
-                    android:adjustViewBounds="true"
-                    android:contentDescription="Registro em tamanho real"
-                    android:scaleType="fitCenter"
-                    tools:srcCompat="@android:drawable/ic_menu_camera" />
-            </com.google.android.material.card.MaterialCardView>
-
-            <!-- Status Badge sem emojis -->
-            <TextView
-                android:id="@+id/dialogStatusBadge"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="12dp"
-                android:background="@drawable/bg_badge_drinking"
-                android:drawablePadding="6dp"
-                android:paddingHorizontal="10dp"
-                android:paddingVertical="4dp"
-                android:textColor="#FFFFFF"
-                android:textSize="13sp"
-                android:textStyle="bold"
-                app:drawableStartCompat="@drawable/ic_water_drop"
-                tools:text="Hidratação Confirmada" />
-
-            <!-- Metadados -->
+            <!-- Metadados do Registro Atual Selecionado -->
             <TextView
                 android:id="@+id/dialogTimestamp"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
+                android:layout_marginTop="12dp"
                 android:textColor="#E0E0E0"
                 android:textSize="14sp"
                 tools:text="Data/Hora: 05/10/2026 às 01:15:30" />
@@ -114,18 +98,18 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="4dp"
                 android:ellipsize="middle"
-                android:maxLines="3"
+                android:maxLines="2"
                 android:textColor="#888888"
                 android:textSize="12sp"
                 tools:text="Arquivo: /storage/emulated/0/Pictures/CatWatch/CAT_DRINKING_...jpg" />
 
-            <!-- Botão de Excluir Foto Individual -->
+            <!-- Botão de Excluir Foto da Sessão -->
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/dialogDeleteButton"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="16dp"
-                android:text="Excluir Registro"
+                android:text="Excluir Foto"
                 android:textColor="#FF5252"
                 app:backgroundTint="#2C1B1B"
                 app:icon="@android:drawable/ic_menu_delete"

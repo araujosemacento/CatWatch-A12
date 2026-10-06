@@ -10,18 +10,26 @@ import com.google.mlkit.vision.label.defaults.ImageLabelerOptions
 class CatDetectorAnalyzer(
     private val onCatDetected: (Float) -> Unit,
     private val labeler: com.google.mlkit.vision.label.ImageLabeler = ImageLabeling.getClient(
-        ImageLabelerOptions.Builder().setConfidenceThreshold(0.60f).build()
+        ImageLabelerOptions.Builder().setConfidenceThreshold(0.80f).build()
     ),
     private val currentTimeProvider: () -> Long = { System.currentTimeMillis() }
 ) : ImageAnalysis.Analyzer {
 
-    
+    // Controle de ativação do ML Kit (permite modo de apenas enquadramento da câmera com zero custo de IA)
+    @Volatile
+    var isAnalysisEnabled: Boolean = true
+
     // Controle de throttling: Processar no máximo 2 quadros por segundo
     private var lastAnalyzedTimestamp = 0L
     private val throttleIntervalMs = 500L
 
     @androidx.annotation.OptIn(ExperimentalGetImage::class)
     override fun analyze(imageProxy: ImageProxy) {
+        if (!isAnalysisEnabled) {
+            imageProxy.close()
+            return
+        }
+
         val currentTimestamp = currentTimeProvider()
 
         // Descarte rápido caso o intervalo de subamostragem não tenha decorrido

@@ -29,15 +29,18 @@ class CaptureCoordinatorTest {
         recordedSnapshots.clear()
     }
 
-    private fun TestScope.createCoordinator(): CaptureCoordinator {
+    private fun TestScope.createCoordinator(
+        confirmationDelayMs: Long = 5_000L,
+        cooldownDurationMs: Long = 120_000L
+    ): CaptureCoordinator {
         return CaptureCoordinator(
             coroutineScope = this,
             currentTimeProvider = { simulatedTimeMs },
             snapshotAction = { eventType, confidence, isConfirmed ->
                 recordedSnapshots.add(SnapshotRecord(eventType, confidence, isConfirmed))
             },
-            confirmationDelayMs = 5_000L,
-            cooldownDurationMs = 25_000L
+            confirmationDelayMs = confirmationDelayMs,
+            cooldownDurationMs = cooldownDurationMs
         )
     }
 
@@ -46,6 +49,7 @@ class CaptureCoordinatorTest {
         val coordinator = createCoordinator()
 
         val triggered = coordinator.onCatCandidate(0.85f)
+        testScheduler.runCurrent()
 
         assertTrue("Primeiro candidato deve disparar a captura", triggered)
         assertEquals(1, recordedSnapshots.size)
@@ -60,17 +64,19 @@ class CaptureCoordinatorTest {
 
         // 1. T0: Gato detectado
         assertTrue(coordinator.onCatCandidate(0.85f))
+        testScheduler.runCurrent()
         assertEquals(1, recordedSnapshots.size)
 
         // 2. Gato continua sendo detectado no frame durante a janela
         simulatedTimeMs += 2_000L
         testScheduler.advanceTimeBy(2_000L)
+        testScheduler.runCurrent()
         assertTrue(coordinator.onCatCandidate(0.92f))
 
         // 3. Avança o tempo restante para completar os 5 segundos
         simulatedTimeMs += 3_000L
         testScheduler.advanceTimeBy(3_000L)
-        runCurrent()
+        testScheduler.runCurrent()
 
         // Deve ter disparado o segundo snapshot (DRINKING)
         assertEquals(2, recordedSnapshots.size)
@@ -85,11 +91,13 @@ class CaptureCoordinatorTest {
 
         // 1. T0: Gato detectado
         assertTrue(coordinator.onCatCandidate(0.85f))
+        testScheduler.runCurrent()
         assertEquals(1, recordedSnapshots.size)
 
         // O gato NÃO é detectado novamente. Avança 5s.
         simulatedTimeMs += 5_000L
         testScheduler.advanceTimeBy(5_000L)
+        testScheduler.runCurrent()
 
         // Não deve disparar DRINKING se não houve detecção adicional na janela
         assertEquals(1, recordedSnapshots.size)
@@ -102,17 +110,20 @@ class CaptureCoordinatorTest {
 
         // T0 em t = 100_000ms
         assertTrue(coordinator.onCatCandidate(0.90f))
+        testScheduler.runCurrent()
         assertEquals(1, recordedSnapshots.size)
 
         // Conclui os 5s de monitoramento
         simulatedTimeMs += 5_000L
         testScheduler.advanceTimeBy(5_000L)
+        testScheduler.runCurrent()
 
-        // t = 115_000ms (10 segundos dentro do cooldown de 25s)
+        // t = 115_000ms (10 segundos dentro do cooldown de 120s)
         simulatedTimeMs += 10_000L
         testScheduler.advanceTimeBy(10_000L)
+        testScheduler.runCurrent()
         assertFalse(
-            "Candidato dentro do cooldown de 25s deve ser rejeitado",
+            "Candidato dentro do cooldown de 120s deve ser rejeitado",
             coordinator.onCatCandidate(0.95f)
         )
         assertEquals(1, recordedSnapshots.size)
@@ -124,17 +135,18 @@ class CaptureCoordinatorTest {
 
         // 1º evento em t = 100_000ms
         assertTrue(coordinator.onCatCandidate(0.85f))
+        testScheduler.runCurrent()
         simulatedTimeMs += 5_000L
         testScheduler.advanceTimeBy(5_000L)
-        runCurrent()
+        testScheduler.runCurrent()
 
-        // Avança 25.001ms após a finalização da sessão anterior
-        simulatedTimeMs += 25_001L
-        testScheduler.advanceTimeBy(25_001L)
-        runCurrent()
+        // Avança 120.001ms após a finalização da sessão anterior
+        simulatedTimeMs += 120_001L
+        testScheduler.advanceTimeBy(120_001L)
+        testScheduler.runCurrent()
 
         assertTrue(
-            "Após expirar o cooldown de 25s, nova aproximação deve ser aceita",
+            "Após expirar o cooldown de 120s, nova aproximação deve ser aceita",
             coordinator.onCatCandidate(0.89f)
         )
         assertEquals(2, recordedSnapshots.size)

@@ -7,26 +7,36 @@
     android:background="@color/black">
 
     <!-- Metade Superior: Preview da Câmera -->
+    <!-- Metade Superior: Preview da Câmera (estático em 45% para zero recomposição de GPU) -->
     <androidx.camera.view.PreviewView
         android:id="@+id/viewFinder"
         android:layout_width="0dp"
         android:layout_height="0dp"
         app:implementationMode="compatible"
-        app:layout_constraintBottom_toTopOf="@id/guideline"
+        app:layout_constraintBottom_toTopOf="@id/cameraGuideline"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent" />
 
-    <!-- Guideline 45% para divisão de tela em retrato -->
+    <!-- Guideline 45% para limite do preview em repouso -->
     <androidx.constraintlayout.widget.Guideline
-        android:id="@+id/guideline"
+        android:id="@+id/cameraGuideline"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
         app:layout_constraintGuide_percent="0.45" />
 
-    <!-- Metade Inferior: Painel de Controle e Feed -->
+    <!-- Guideline 20% para ancoragem do topo do painel deslizante em expansão máxima -->
+    <androidx.constraintlayout.widget.Guideline
+        android:id="@+id/guideline"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        app:layout_constraintGuide_percent="0.20" />
+
+    <!-- Painel de Controle e Feed (Repouso em 45% -> Expansão até 80% via translationY com zero-jank) -->
     <androidx.constraintlayout.widget.ConstraintLayout
+        android:id="@+id/feedPanel"
         android:layout_width="0dp"
         android:layout_height="0dp"
         android:background="#121212"
@@ -42,41 +52,107 @@
             android:layout_height="wrap_content"
             app:layout_constraintTop_toTopOf="parent">
 
-            <!-- Barra Normal de Título do Feed -->
-            <RelativeLayout
+            <!-- Barra Normal de Título do Feed e Controles Operacionais -->
+            <LinearLayout
                 android:id="@+id/normalToolbar"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
+                android:orientation="vertical"
                 android:paddingHorizontal="12dp"
                 android:paddingTop="8dp"
-                android:paddingBottom="4dp">
+                android:paddingBottom="6dp">
 
-                <TextView
-                    android:id="@+id/feedTitleTextView"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_alignParentStart="true"
-                    android:layout_centerVertical="true"
-                    android:layout_toStartOf="@id/selectModeButton"
-                    android:layout_marginEnd="8dp"
-                    android:text="Detecções"
-                    android:textColor="#FFFFFF"
-                    android:textSize="16sp"
-                    android:textStyle="bold" />
+                <!-- Linha 1: Título do Feed e Ação de Seleção -->
+                <RelativeLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content">
 
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/selectModeButton"
-                    style="@style/Widget.MaterialComponents.Button.TextButton"
-                    android:layout_width="wrap_content"
+                    <TextView
+                        android:id="@+id/feedTitleTextView"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_alignParentStart="true"
+                        android:layout_centerVertical="true"
+                        android:text="Detecções"
+                        android:textColor="#FFFFFF"
+                        android:textSize="16sp"
+                        android:textStyle="bold" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/selectModeButton"
+                        style="@style/Widget.MaterialComponents.Button.TextButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_alignParentEnd="true"
+                        android:layout_centerVertical="true"
+                        android:text="Selecionar"
+                        android:textColor="#81C784"
+                        android:textSize="13sp"
+                        app:icon="@android:drawable/ic_menu_agenda"
+                        app:iconTint="#81C784" />
+                </RelativeLayout>
+
+                <!-- Linha 2: Seletor Operacional em 3 Estados (Segmented Button) -->
+                <com.google.android.material.button.MaterialButtonToggleGroup
+                    android:id="@+id/cameraModeToggleGroup"
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_alignParentEnd="true"
-                    android:layout_centerVertical="true"
-                    android:text="Selecionar"
-                    android:textColor="#81C784"
-                    android:textSize="13sp"
-                    app:icon="@android:drawable/ic_menu_agenda"
-                    app:iconTint="#81C784" />
-            </RelativeLayout>
+                    android:layout_marginTop="4dp"
+                    app:singleSelection="true"
+                    app:selectionRequired="true">
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnModeOff"
+                        style="?attr/materialButtonOutlinedStyle"
+                        android:layout_width="0dp"
+                        android:layout_height="36dp"
+                        android:layout_weight="1"
+                        android:insetTop="0dp"
+                        android:insetBottom="0dp"
+                        android:paddingHorizontal="4dp"
+                        android:text="Desligado"
+                        android:textColor="#E0E0E0"
+                        android:textSize="11sp"
+                        app:icon="@drawable/ic_videocam_off"
+                        app:iconSize="14dp"
+                        app:iconTint="#E0E0E0"
+                        app:strokeColor="#333333" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnModeFrame"
+                        style="?attr/materialButtonOutlinedStyle"
+                        android:layout_width="0dp"
+                        android:layout_height="36dp"
+                        android:layout_weight="1"
+                        android:insetTop="0dp"
+                        android:insetBottom="0dp"
+                        android:paddingHorizontal="4dp"
+                        android:text="Enquadrar"
+                        android:textColor="#E0E0E0"
+                        android:textSize="11sp"
+                        app:icon="@drawable/ic_crop_free"
+                        app:iconSize="14dp"
+                        app:iconTint="#E0E0E0"
+                        app:strokeColor="#333333" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnModeMonitor"
+                        style="?attr/materialButtonOutlinedStyle"
+                        android:layout_width="0dp"
+                        android:layout_height="36dp"
+                        android:layout_weight="1"
+                        android:insetTop="0dp"
+                        android:insetBottom="0dp"
+                        android:paddingHorizontal="4dp"
+                        android:text="Monitorar"
+                        android:textColor="#81C784"
+                        android:textSize="11sp"
+                        app:icon="@drawable/ic_visibility"
+                        app:iconSize="14dp"
+                        app:iconTint="#81C784"
+                        app:strokeColor="#333333" />
+                </com.google.android.material.button.MaterialButtonToggleGroup>
+            </LinearLayout>
 
             <!-- Barra Contextual de Seleção em Lote (Action Mode) -->
             <RelativeLayout
@@ -250,6 +326,46 @@
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintTop_toTopOf="@id/eventsRecyclerView" />
+
+        <!-- Botão Flutuante com Badge de Notificação -->
+        <androidx.constraintlayout.widget.ConstraintLayout
+            android:id="@+id/fabContainer"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="16dp"
+            android:layout_marginBottom="16dp"
+            android:visibility="gone"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintEnd_toEndOf="parent"
+            tools:visibility="visible">
+
+            <com.google.android.material.floatingactionbutton.FloatingActionButton
+                android:id="@+id/fabScrollToTop"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_margin="8dp"
+                android:contentDescription="@string/app_name"
+                android:src="@drawable/ic_chevron_up"
+                app:backgroundTint="#2E7D32"
+                app:layout_constraintBottom_toBottomOf="parent"
+                app:layout_constraintEnd_toEndOf="parent"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintTop_toTopOf="parent"
+                app:tint="@color/white" />
+
+            <View
+                android:id="@+id/fabNewItemsBadge"
+                android:layout_width="14dp"
+                android:layout_height="14dp"
+                android:layout_marginTop="6dp"
+                android:layout_marginEnd="6dp"
+                android:background="@drawable/bg_red_dot"
+                android:elevation="8dp"
+                android:visibility="gone"
+                app:layout_constraintEnd_toEndOf="@id/fabScrollToTop"
+                app:layout_constraintTop_toTopOf="@id/fabScrollToTop"
+                tools:visibility="visible" />
+        </androidx.constraintlayout.widget.ConstraintLayout>
 
     </androidx.constraintlayout.widget.ConstraintLayout>
 

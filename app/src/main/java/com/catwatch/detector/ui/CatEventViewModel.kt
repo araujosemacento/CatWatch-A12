@@ -101,4 +101,15 @@ class CatEventViewModel(application: Application) : AndroidViewModel(application
             repository.insertEvent(event)
         }
     }
+
+    /**
+     * Identifica a sessão encadeada à qual o [event] pertence dentro da lista [allEvents].
+     * Agrupa eventos com diferença temporal consecutiva menor ou igual a 5 minutos.
+     */
+    fun getChainedSessionForEvent(
+        event: CatEventEntity,
+        allEvents: List<CatEventEntity> = _eventsState.value
+    ): List<CatEventEntity> {
+        return com.catwatch.detector.utils.ChainedSessionManager.getChainedSessionForEvent(event, allEvents)
+    }
 }

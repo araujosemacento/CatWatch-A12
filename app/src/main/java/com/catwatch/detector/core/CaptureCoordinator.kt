@@ -29,7 +29,7 @@ class CaptureCoordinator(
     private val currentTimeProvider: () -> Long = { System.currentTimeMillis() },
     private val snapshotAction: ((String, Float, Boolean) -> Unit)? = null,
     val confirmationDelayMs: Long = 5_000L,
-    val cooldownDurationMs: Long = 25_000L
+    val cooldownDurationMs: Long = 120_000L
 ) {
     private var lastEventTimestamp = 0L
     private var activeMonitoringJob: Job? = null
@@ -47,7 +47,7 @@ class CaptureCoordinator(
         }
 
         // 2. Se estiver dentro da janela de cooldown pós-evento, ignora
-        if (now - lastEventTimestamp < cooldownDurationMs) {
+        if (lastEventTimestamp > 0L && now - lastEventTimestamp < cooldownDurationMs) {
             return false
         }
 

@@ -17,6 +17,7 @@ Para evitar duplicação de informações e manter uma **única fonte da verdade
 3. **Respeito ao Hardware Exynos 850:** Nunca eleve a taxa de inferência acima de 2 FPS e nunca execute inferência ou I/O em disco na thread principal (*MainThread*).
 4. **Zero Emojis na Interface:** É estritamente proibido utilizar emojis em textos de UI (botões, chips, badges de status, diálogos, títulos ou notificações). Utilize texto técnico limpo e, quando necessário reforço visual, utilize ícones vetoriais nativos do Android (Drawables / Vector Drawables / Material Icons).
 5. **Resiliência e Não-Sobreposição de Layout:** Nenhum layout pode sobrepor componentes ou sofrer cortes acidentais de conteúdo por rigidez de contêiner em decorrência de escala de fonte (acessibilidade de até 200%), zoom de tela ou orientação. O uso de reticências/elipses (`ellipsize`) controladas em textos extensos (ex: nomes de arquivos e caminhos no disco) é permitido e recomendado para preservar a coesão e proporção visual do layout. Nunca utilize âncoras frágeis em views com visibilidade dinâmica (`GONE`); utilize contêineres unificados e larguras flexíveis (`0dp`) com restrições bidirecionais.
+6. **Zero Redimensionamento Dinâmico de Surface:** Sob nenhuma circunstância anime ou redimensione dinamicamente a `PreviewView` ou sua `Surface` durante gestos de rolagem (*scroll/swipe*). Para criar dinamicidade de tela (ex: expansão do feed), utilize sobreposição com translação vertical (`translationY` ou `BottomSheetBehavior`), mantendo a camada de vídeo estática para evitar engasgos (*jank*) de GPU no Exynos 850.
 
 ---
 
@@ -48,8 +49,9 @@ flowchart TD
     F1 --> F2[Fase 2: Persistência & Cooldown]
     F2 --> F3[Fase 3: Pipeline de Visão CameraX + ML Kit]
     F3 --> F4[Fase 4: UI de Monitoramento & Ciclo de Vida]
-    F4 --> F41[Fase 4.1: Gestão de Mídia, Filtros & Confirmação de Hidratação]
-    F41 --> F5[Fase 5: Testes de Soak 24/7 & Calibração Térmica]
+    F4 --> F41[Fase 4.1: Otimização Core e Sticky UX (Lote 1)]
+    F41 --> F42[Fase 4.2: Agrupamentos e Chained Sessions (Lote 2)]
+    F42 --> F5[Fase 5: Testes de Soak 24/7 & Calibração Térmica]
 ```
 
 ### Fase 0: Preparação de Ambiente & Hardware
@@ -103,20 +105,28 @@ flowchart TD
 * [x] Vincular CameraX ao ciclo de vida da `MainActivity` (`ProcessCameraProvider`).
 * **Gate de Aceite:** App inicia a câmera, exibe a imagem e atualiza a lista instantaneamente ao detectar um gato. (CONCLUÍDO)
 
-### Fase 4.1: Gestão de Mídia, Filtros Temporais e Confirmação de Hidratação
+### Fase 4.1: Otimização Core e Sticky UX (Lote 1)
 
-* [x] Atualizar `CaptureCoordinator` para estratégia Dual-Snapshot:
-  * $T_0$: Foto imediata de aproximação (`APPROACH`).
-  * $T_5$: Foto de confirmação de hidratação (`DRINKING`) caso o animal permaneça na vasilha por 5 segundos.
-  * Migrar salvamento para diretório público `Pictures/CatWatch` com notificação ao `MediaScannerConnection` (visível na Galeria da Samsung e Meus Arquivos).
-* [x] Atualizar `CatEventEntity` e `CatEventDao`:
-  * Suporte aos novos campos (`eventType`, `isConfirmedDrinking`).
-  * Consultas por período de datas (`getEventsByDateRange`).
-  * Exclusão individual e em lote (`deleteEventsByIds`).
-* [x] Criar visualizador de imagem em tela cheia (*Fullscreen Dialog* com detalhes de confiança e horário).
-* [x] Implementar barra de filtros temporais (chips: *Hoje*, *24h*, *Ontem*, *Todos* e *MaterialDatePicker* para intervalo customizado).
-* [x] Implementar modo de seleção em lote com exclusão atômica (remoção no SQLite/Room + exclusão do arquivo `.jpg` do disco).
-* **Gate de Aceite:** Usuário visualiza fotos em tamanho real, filtra o histórico por datas, seleciona e exclui fotos individualmente ou em lote (sincronizando disco e banco), e encontra as fotos na Galeria nativa. (CONCLUÍDO)
+* [x] Atualizar `CaptureCoordinator` para estratégia Dual-Snapshot (T0 e T5 com salvamento público `Pictures/CatWatch`).
+* [x] Atualizar Repositórios e Banco de Dados com suporte aos novos campos e buscas por datas.
+* [x] Otimizar `ImageCapture` travando resolução alvo em 720p e compressão 80% JPEG.
+* [x] Elevar threshold de confiança do ML Kit para 80% e cooldown temporal para 2 minutos (120s).
+* [x] Implementar botão flutuante (*Scroll to Top*) no canto inferior direito com badge de novos registros (`fabNewItemsBadge`).
+* [x] Lógica "Sticky" de navegação: O RecyclerView acompanha automaticamente as novas fotos que chegam se estiver na posição zero (topo), caso contrário, o botão de scroll to top indica novos registros.
+* [x] Modularização do diálogo de detalhes com suporte a exclusão atômica (`CatEventDetailDialog`) e decodificação segura (`ImageUtils`).
+* [x] Configuração de ícone oficial adaptativo e monocromático (Themed Icons) a partir do vetor SVG da aplicação.
+* [x] Implementar seletor operacional de 3 estados na barra superior (`Desligado`, `Enquadrar`, `Monitorar`) via `MaterialButtonToggleGroup`.
+* [x] Implementar painel deslizante dinâmico de eventos (repouso em 45% $\rightarrow$ expansão até 80% ao scrollar o histórico com 20% do preview preservado no topo e zero-jank na GPU).
+* [x] Implementar visualizador de imagem imersivo (Tela Cheia) usando `ViewPager2` num `DialogFragment` (Carrossel Horizontal com Swipe). **Restrição:** O carrossel deve respeitar sessões encadeadas (o primeiro e último item do swipe são o início e fim daquela sessão específica de hidratação).
+* [x] **Gate de Aceite:** O app inicializa sem falhas no Galaxy A12, opera o seletor de 3 estados com controle de inferência e ciclo de vida, transiciona o painel deslizante de feed com zero-jank na GPU e exibe o carrossel em tela cheia restrito à sessão ativa. (CONCLUÍDO)
+
+### Fase 4.2: Agrupamentos e Chained Sessions (Lote 2)
+
+* [ ] Refatorar a UI de visualização suportando *Grid Mode* e *List Mode* com seletor (Toggle).
+* [ ] Desenvolver algoritmo na ViewModel para identificar "Sessões Encadeadas" (timetags com < 5 min de diferença se unem num único objeto/álbum de sessão).
+* [ ] Adaptar o `CatEventAdapter` para ser um Múltiplo Type Adapter.
+  * No modo Grade: Mostrar fotos avulsas, mas quando em sessão, exibir como álbum com divider da data.
+  * No modo Lista: Dias separados em Accordions expansíveis. As sessões dentro do Accordion recebem um divisor horizontal indicando o grupo encadeado.
 
 ### Fase 5: Operação 24/7 e Homologação no Galaxy A12
 
@@ -174,8 +184,10 @@ Todo pull request ou entrega de código gerada por agentes deve ser checada cont
 
 * [ ] **JDK 17 Compliance:** Nenhuma sintaxe incompatível com o compilador Java 17 foi inserida.
 * [ ] **Zero-Leak Camera Buffer:** Todos os caminhos de código dentro de `ImageAnalysis.Analyzer` invocam `imageProxy.close()`.
+* [ ] **Zero Bounding Boxes / Object Detection:** O projeto utiliza exclusivamente o classificador genérico global (*Image Labeling*) por restrições térmicas do Exynos 850. Nunca incorpore detecção espacial.
 * [ ] **Background Threading:** A chamada `ImageCapture.takePicture()` e o processamento de banco Room utilizam executores assíncronos (`Dispatchers.IO` ou `ExecutorService`).
-* [ ] **Cooldown Respeitado:** O timestamp de última captura é validado antes de invocar `takePicture()`.
-* [ ] **Imagens Otimizadas:** A resolução de análise está travada em VGA (640x480).
+* [ ] **Cooldown Respeitado:** O timestamp de última captura e as regras de 120s devem ser rigidamente protegidas para impedir falsos positivos.
+* [ ] **Imagens Otimizadas:** A resolução de análise está travada em VGA (640x480). A resolução de captura está travada em 720p.
 * [ ] **Zero Emojis:** Nenhum caractere emoji em textos da interface do usuário.
 * [ ] **Layout Responsivo:** Nenhuma sobreposição ou corte indevido de texto ao variar fontes e escalas de tela (elipses intencionais são aceitas).
+* [ ] **Zero-Jank Surface:** Nenhuma recomposição ou redimensionamento de `PreviewView` acoplado ao scroll da UI.

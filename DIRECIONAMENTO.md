@@ -18,9 +18,9 @@ Este documento serve como especificação técnica detalhada e instrução de co
 1. **Eficiência Térmica e Subamostragem:** O Exynos 850 não dispõe de NPU dedicada. O analisador de visão computacional deve limitar a taxa de inferência a **1 a 2 frames por segundo (FPS)**. O pipeline de câmera pode capturar a 30 FPS, mas os frames excedentes devem ser descartados imediatamente no buffer nativo.
 2. **Buffer Zero-Copy:** Utilização obrigatória da API `CameraX` com entrega de `ImageProxy` diretamente para o `InputImage` do ML Kit, liberando o frame via `imageProxy.close()` no bloco `finally`/`addOnCompleteListener`.
 3. **Resolução Assíncrona Dual:**
-   * **Fluxo de Análise (`ImageAnalysis`):** 640x480 (VGA) ou resolução próxima a 480p para minimizar o processamento por matriz de pixel.
-   * **Fluxo de Captura (`ImageCapture`):** Resolução padrão de foto (ex: 1080p ou nativa da lente) acionada apenas quando o evento for confirmado, garantindo imagem nítida para auditoria.
-4. **Política de Cooldown (Anti-duplicação):** Uma vez que um gato seja detectado e registrado, o sistema entra em um estado de descanso (*debounce/cooldown*) configurável (padrão: 10 a 15 segundos) antes de permitir novo registro para o mesmo animal contínuo no campo de visão.
+   * **Fluxo de Análise (`ImageAnalysis`):** 640x480 (VGA) ou resolução próxima a 480p para minimizar o processamento por matriz de pixel. O modelo a ser utilizado é estritamente o `Image Labeling` genérico para preservação de bateria e temperatura. **Nunca** incorpore detecção espacial com Bounding Boxes (`Object Detection`), uma vez que os recursos do SoC do A12 são insuficientes para tal em regimes 24/7.
+   * **Fluxo de Captura (`ImageCapture`):** Resolução forçada para 720p (compressão de 80% JPEG) para poupar uso de disco a longo prazo.
+4. **Política de Cooldown (Anti-duplicação):** O sistema entra em um estado de descanso de **2 minutos (120 segundos)** após uma sessão. O *threshold* do ML Kit para reconhecer o felino deve operar em **80% a 85%** de precisão.
 
 ---
 
@@ -155,9 +155,9 @@ class CatDetectorAnalyzer(
     private val onCatDetected: (Float) -> Unit
 ) : ImageAnalysis.Analyzer {
 
-    // Configuração do detector on-device com threshold de confiança
+    // Configuração do detector on-device com threshold estrito
     private val options = ImageLabelerOptions.Builder()
-        .setConfidenceThreshold(0.60f)
+        .setConfidenceThreshold(0.80f)
         .build()
 
     private val labeler = ImageLabeling.getClient(options)
@@ -248,7 +248,7 @@ class CaptureCoordinator(
     private val onEventLogged: (File, Float, String, Boolean) -> Unit
 ) {
     private var lastEventTimestamp = 0L
-    private val cooldownDurationMs = 25_000L
+    private val cooldownDurationMs = 120_000L // 2 Minutos
     private val confirmationDelayMs = 5_000L
     private var activeMonitoringJob: Job? = null
     private var lastSeenConfidence = 0f
@@ -363,18 +363,30 @@ interface CatEventDao {
 
 ### 5.4. Interface, Visualização e Gerenciamento de Feed
 
-Para assegurar excelente usabilidade no acompanhamento do animal, o módulo de UI contempla:
+Para assegurar excelente usabilidade no acompanhamento do animal, o módulo de UI conta com os seguintes componentes e fluxos operacionais:
 
-1. **Visualizador em Tela Cheia (*Fullscreen Dialog*):**
-   * Ao tocar em qualquer card do feed, abre-se uma visualização detalhada em alta resolução.
-   * Apresenta timestamp formatado, indicador de confiança do ML Kit e badge destacada (*"Aproximação"* vs *"Hidratação Confirmada"*).
-2. **Filtro Temporal Dinâmico:**
-   * Barra de filtros rápidos acima do feed: *"Hoje"*, *"Últimas 24h"*, *"Ontem"*, *"Todos"*.
-   * Seletor de calendário (*MaterialDatePicker*) para busca em intervalos de datas customizados.
-3. **Exclusão Manual (Individual e em Lote):**
-   * Exclusão individual por botão no card do item com diálogo de confirmação.
-   * Modo de seleção em lote (*Action Mode* / Toolbar contextual): ativa checkboxes em todos os cards, botão *"Selecionar Todos"* e botão de exclusão em massa.
-   * **Exclusão Sincronizada:** Ao excluir no banco Room, o arquivo `.jpg` correspondente no disco (`Pictures/CatWatch`) é deletado e o MediaScanner é atualizado para manter a Galeria e o armazenamento limpos.
+1. **Controle Operacional de Monitoramento em 3 Estados (`Segmented Button`):**
+   * Localizado no cabeçalho superior (`normalToolbar`), substitui o switch binário por um seletor compacto de 3 estados (`MaterialButtonToggleGroup` com seleção única):
+     * **Desligado (`Standby`):** Desvincula a câmera (`cameraProvider.unbindAll()`), desligando o sensor óptico. Alívio térmico imediato para uso focado no histórico de fotos ou manutenção do disco.
+     * **Enquadrar (`Preview Sem IA`):** Câmera ativa no `PreviewView`, mas o `CatDetectorAnalyzer` descarta todos os quadros no topo do loop (`imageProxy.close()`). Permite alinhar o tripé e limpar a tigela sem disparar capturas indesejadas.
+     * **Monitorar (`Operação 24/7`):** Pipeline completo ativo (`PreviewView` + `CatDetectorAnalyzer` com threshold de 80% + Dual-Snapshot T0/T5 via `CaptureCoordinator`).
+2. **Painel Dinâmico Deslizante de Eventos (45% a 80%) com Zero-Jank no Exynos 850:**
+   * **Modo Painel (Repouso em ~45%):** Quando no topo da lista (`position == 0`), o feed ocupa a metade inferior e o preview tem amplo destaque. A navegação sticky fica engatada e o FAB permanece oculto.
+   * **Modo Galeria Expandida (Expansão até 80%):** Ao rolar para baixo para inspecionar fotos antigas, o painel do feed desliza suavemente sobre o preview, travando em 80% da tela. Uma faixa superior de 20% do preview é preservada para garantir a percepção de que a câmera continua ativa. O modo sticky desatraca para não interromper a leitura do histórico e o FAB com chevron é exibido.
+   * **Invariante Crítica de Performance (Zero-Jank):** A `PreviewView` do CameraX **nunca é redimensionada dinamicamente** durante o scroll (o que causaria recomposição contínua de buffers na GPU do Exynos 850). O painel de feed sobrepõe o preview através de translação vertical (`translationY` / `BottomSheetBehavior`).
+3. **Navegação Sticky e Botão Flutuante (FAB com Badge):** *(IMPLEMENTADO)*
+   * O feed acompanha automaticamente as novas fotos que chegam se o usuário estiver na posição zero (`position == 0`).
+   * Ao rolar para o passado, o FAB (`fabScrollToTop`) é revelado no canto inferior direito. Se novos registros entrarem enquanto a lista está rolada, o badge indicador (`fabNewItemsBadge` com ponto vermelho) alerta o usuário. Ao tocar no FAB, a lista executa `smoothScrollToPosition(0)`, recolhe o painel para 45% e reativa o comportamento sticky.
+4. **Visualizador de Detalhes e Exclusão Atômica (`CatEventDetailDialog`):** *(IMPLEMENTADO)*
+   * Extraído em componente dedicado, exibe foto em alta resolução decodificada em RGB_565 assíncrono via `ImageUtils`, badge de status sem emojis e metadados detalhados com exclusão atômica (SQLite + disco).
+   * Suporte futuro para carrossel horizontal de sessão (`ViewPager2`) no Lote 2.
+5. **Múltiplos Formatos de Agrupamento (*Grid Mode* & *List Mode*):** *(Lote 2)*
+   * Lógica analítica no `CatEventViewModel` capaz de agrupar fotos contínuas espaçadas por $< 5\text{min}$ numa única **Chained Session** (Sessão Encadeada de Hidratação).
+   * No modo grade: Sessões viram "Álbuns" indicando o tempo de início e fim. Divisores de data isolam os dias.
+   * No modo lista: Visualização por "Accordions" (dias colapsáveis), e itens de sessão divididos com uma barra indicativa de continuidade de evento.
+6. **Filtro Temporal Dinâmico e Exclusões em Lote:** *(IMPLEMENTADO)*
+   * Chips de filtros rápidos (*"Hoje"*, *"Últimas 24h"*, *"Ontem"*, *"Todos"*) e *MaterialDatePicker* para intervalo customizado com ícones vetoriais nativos.
+   * Modo de seleção em lote com contêiner unificado (`toolbarContainer`), eliminando sobreposição com a barra de chips e garantindo proteção contra escalas de fontes ampliadas.
 
 ---
 
