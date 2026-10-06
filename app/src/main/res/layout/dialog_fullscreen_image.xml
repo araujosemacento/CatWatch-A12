@@ -73,6 +73,20 @@
                 android:layout_width="match_parent"
                 android:layout_height="280dp" />
 
+            <!-- Indicador Dinâmico de Pontos -->
+            <com.google.android.material.tabs.TabLayout
+                android:id="@+id/tabLayoutIndicator"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:background="@android:color/transparent"
+                app:tabBackground="@drawable/bg_tab_indicator"
+                app:tabGravity="center"
+                app:tabIndicatorHeight="0dp"
+                app:tabMaxWidth="16dp"
+                app:tabPaddingEnd="8dp"
+                app:tabPaddingStart="8dp" />
+
             <!-- Metadados do Registro Atual Selecionado -->
             <TextView
                 android:id="@+id/dialogTimestamp"

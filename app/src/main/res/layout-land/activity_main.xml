@@ -17,6 +17,37 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent" />
 
+    <!-- Overlay Câmera Desligada -->
+    <LinearLayout
+        android:id="@+id/cameraOffOverlay"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:background="#A0000000"
+        android:gravity="center"
+        android:orientation="vertical"
+        android:visibility="gone"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toStartOf="@id/guideline"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent">
+
+        <ImageView
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:contentDescription="@string/app_name"
+            android:src="@drawable/ic_videocam_off"
+            app:tint="#CCCCCC" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Câmera em repouso"
+            android:textColor="#CCCCCC"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+    </LinearLayout>
+
     <!-- Guideline 50% Vertical para Divisão em Paisagem -->
     <androidx.constraintlayout.widget.Guideline
         android:id="@+id/guideline"
@@ -102,11 +133,11 @@
                         android:insetBottom="0dp"
                         android:paddingHorizontal="4dp"
                         android:text="Desligado"
-                        android:textColor="#E0E0E0"
+                        android:textColor="@color/selector_toggle_text"
                         android:textSize="11sp"
                         app:icon="@drawable/ic_videocam_off"
                         app:iconSize="14dp"
-                        app:iconTint="#E0E0E0"
+                        app:iconTint="@color/selector_toggle_text"
                         app:strokeColor="#333333" />
 
                     <com.google.android.material.button.MaterialButton
@@ -119,11 +150,11 @@
                         android:insetBottom="0dp"
                         android:paddingHorizontal="4dp"
                         android:text="Enquadrar"
-                        android:textColor="#E0E0E0"
+                        android:textColor="@color/selector_toggle_text"
                         android:textSize="11sp"
                         app:icon="@drawable/ic_crop_free"
                         app:iconSize="14dp"
-                        app:iconTint="#E0E0E0"
+                        app:iconTint="@color/selector_toggle_text"
                         app:strokeColor="#333333" />
 
                     <com.google.android.material.button.MaterialButton
@@ -136,11 +167,11 @@
                         android:insetBottom="0dp"
                         android:paddingHorizontal="4dp"
                         android:text="Monitorar"
-                        android:textColor="#81C784"
+                        android:textColor="@color/selector_toggle_text"
                         android:textSize="11sp"
                         app:icon="@drawable/ic_visibility"
                         app:iconSize="14dp"
-                        app:iconTint="#81C784"
+                        app:iconTint="@color/selector_toggle_text"
                         app:strokeColor="#333333" />
                 </com.google.android.material.button.MaterialButtonToggleGroup>
             </LinearLayout>

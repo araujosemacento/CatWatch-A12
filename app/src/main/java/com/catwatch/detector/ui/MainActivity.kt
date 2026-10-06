@@ -62,6 +62,7 @@ class MainActivity : AppCompatActivity() {
     private var currentCameraProvider: ProcessCameraProvider? = null
     private var isCameraActive: Boolean = false
     private var isStickyModeEnabled: Boolean = true
+    private var isPanelExpanded: Boolean = false
     private var reposeTranslationY: Float = 0f
 
     private lateinit var cameraExecutor: ExecutorService
@@ -72,7 +73,14 @@ class MainActivity : AppCompatActivity() {
     ) { permissions ->
         val cameraGranted = permissions[Manifest.permission.CAMERA] ?: false
         if (cameraGranted) {
-            startCamera()
+            val prefs = getSharedPreferences("catwatch_prefs", android.content.Context.MODE_PRIVATE)
+            val savedMode = prefs.getInt("camera_mode", R.id.btnModeMonitor)
+            if (savedMode != R.id.btnModeOff) {
+                startCamera()
+            } else {
+                isCameraActive = false
+                Log.i("MainActivity", "Permissões concedidas. Modo Desligado persistido: sensor mantido desativado.")
+            }
         } else {
             Toast.makeText(this, "Permissão da câmera é necessária para o monitoramento.", Toast.LENGTH_LONG).show()
         }
@@ -108,6 +116,86 @@ class MainActivity : AppCompatActivity() {
             reposeTranslationY = totalHeight * 0.25f
             binding.feedPanel.translationY = reposeTranslationY
         }
+
+        var isDraggingPanel = false
+        var lastY = 0f
+        var startY = 0f
+        val touchSlop = android.view.ViewConfiguration.get(this).scaledTouchSlop
+
+        fun snapPanel() {
+            val currentTranslation = binding.feedPanel.translationY
+            val target = if (currentTranslation < reposeTranslationY / 2) 0f else reposeTranslationY
+            isPanelExpanded = (target == 0f)
+            binding.feedPanel.animate().translationY(target).setDuration(250).start()
+            
+            isStickyModeEnabled = !isPanelExpanded
+            if (isPanelExpanded) {
+                binding.fabContainer.visibility = View.VISIBLE
+            } else {
+                binding.fabContainer.visibility = View.GONE
+                binding.fabNewItemsBadge.visibility = View.GONE
+            }
+        }
+
+        binding.eventsRecyclerView.addOnItemTouchListener(object : androidx.recyclerview.widget.RecyclerView.SimpleOnItemTouchListener() {
+            override fun onInterceptTouchEvent(rv: androidx.recyclerview.widget.RecyclerView, e: android.view.MotionEvent): Boolean {
+                val layoutManager = binding.eventsRecyclerView.layoutManager as? androidx.recyclerview.widget.LinearLayoutManager
+                    ?: return false
+                val firstVisibleItem = layoutManager.findFirstCompletelyVisibleItemPosition()
+
+                when (e.actionMasked) {
+                    android.view.MotionEvent.ACTION_DOWN -> {
+                        isDraggingPanel = false
+                        startY = e.rawY
+                        lastY = e.rawY
+                    }
+                    android.view.MotionEvent.ACTION_MOVE -> {
+                        val totalDy = kotlin.math.abs(e.rawY - startY)
+                        if (totalDy > touchSlop && !isDraggingPanel) {
+                            if (e.rawY - startY < 0 && binding.feedPanel.translationY > 0f) {
+                                isDraggingPanel = true
+                            } else if (e.rawY - startY > 0 && firstVisibleItem <= 0 && binding.feedPanel.translationY < reposeTranslationY) {
+                                isDraggingPanel = true
+                            }
+                            if (isDraggingPanel) {
+                                binding.feedPanel.animate().cancel()
+                                lastY = e.rawY
+                                return true
+                            }
+                        }
+                    }
+                    android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
+                        if (isDraggingPanel) {
+                            snapPanel()
+                            isDraggingPanel = false
+                            return true
+                        }
+                    }
+                }
+                return false
+            }
+
+            override fun onTouchEvent(rv: androidx.recyclerview.widget.RecyclerView, e: android.view.MotionEvent) {
+                when (e.actionMasked) {
+                    android.view.MotionEvent.ACTION_MOVE -> {
+                        val dy = e.rawY - lastY
+                        lastY = e.rawY
+                        
+                        if (isDraggingPanel) {
+                            var newTranslation = binding.feedPanel.translationY + dy
+                            newTranslation = newTranslation.coerceIn(0f, reposeTranslationY)
+                            binding.feedPanel.translationY = newTranslation
+                        }
+                    }
+                    android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
+                        if (isDraggingPanel) {
+                            snapPanel()
+                            isDraggingPanel = false
+                        }
+                    }
+                }
+            }
+        })
     }
 
     private fun observeViewModel() {
@@ -127,22 +215,13 @@ class MainActivity : AppCompatActivity() {
         binding.eventsRecyclerView.addOnScrollListener(object : androidx.recyclerview.widget.RecyclerView.OnScrollListener() {
             override fun onScrolled(recyclerView: androidx.recyclerview.widget.RecyclerView, dx: Int, dy: Int) {
                 super.onScrolled(recyclerView, dx, dy)
-                val isPortrait = resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT
                 val firstVisibleItem = layoutManager.findFirstVisibleItemPosition()
 
                 if (dy > 0) {
-                    // Rolagem para baixo: expande o painel para modo galeria (80%) com zero-jank
-                    if (isPortrait && binding.feedPanel.translationY > 0f) {
-                        binding.feedPanel.animate().translationY(0f).setDuration(250).start()
-                    }
                     isStickyModeEnabled = false
                     binding.fabContainer.visibility = View.VISIBLE
                 } else if (dy < 0) {
-                    // Rolagem para cima: ao atingir o topo, retorna ao modo painel de repouso (45%)
                     if (firstVisibleItem == 0) {
-                        if (isPortrait && binding.feedPanel.translationY < reposeTranslationY) {
-                            binding.feedPanel.animate().translationY(reposeTranslationY).setDuration(250).start()
-                        }
                         isStickyModeEnabled = true
                         binding.fabContainer.visibility = View.GONE
                         binding.fabNewItemsBadge.visibility = View.GONE
@@ -154,7 +233,8 @@ class MainActivity : AppCompatActivity() {
         binding.fabScrollToTop.setOnClickListener {
             binding.eventsRecyclerView.smoothScrollToPosition(0)
             val isPortrait = resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT
-            if (isPortrait) {
+            if (isPortrait && isPanelExpanded) {
+                isPanelExpanded = false
                 binding.feedPanel.animate().translationY(reposeTranslationY).setDuration(250).start()
             }
             isStickyModeEnabled = true
@@ -206,10 +286,18 @@ class MainActivity : AppCompatActivity() {
             confirmBatchDeletion()
         }
 
-        // Configuração do seletor operacional de 3 estados
-        binding.cameraModeToggleGroup.check(R.id.btnModeMonitor)
+        // Configuração do seletor operacional de 3 estados com persistência
+        val prefs = getSharedPreferences("catwatch_prefs", android.content.Context.MODE_PRIVATE)
+        val savedMode = prefs.getInt("camera_mode", R.id.btnModeMonitor)
+        binding.cameraModeToggleGroup.check(savedMode)
+        updateCameraOverlay(savedMode)
+
         binding.cameraModeToggleGroup.addOnButtonCheckedListener { _, checkedId, isChecked ->
             if (!isChecked) return@addOnButtonCheckedListener
+            
+            prefs.edit().putInt("camera_mode", checkedId).apply()
+            updateCameraOverlay(checkedId)
+            
             when (checkedId) {
                 R.id.btnModeOff -> {
                     detectorAnalyzer?.isAnalysisEnabled = false
@@ -232,6 +320,14 @@ class MainActivity : AppCompatActivity() {
                     Toast.makeText(this, "Modo Monitoramento 24/7 ativo.", Toast.LENGTH_SHORT).show()
                 }
             }
+        }
+    }
+
+    private fun updateCameraOverlay(checkedId: Int) {
+        if (checkedId == R.id.btnModeOff) {
+            binding.cameraOffOverlay.visibility = View.VISIBLE
+        } else {
+            binding.cameraOffOverlay.visibility = View.GONE
         }
     }
 
@@ -334,18 +430,45 @@ class MainActivity : AppCompatActivity() {
         }
 
         if (missingPermissions.isEmpty()) {
-            startCamera()
+            val prefs = getSharedPreferences("catwatch_prefs", android.content.Context.MODE_PRIVATE)
+            val savedMode = prefs.getInt("camera_mode", R.id.btnModeMonitor)
+            if (savedMode != R.id.btnModeOff) {
+                startCamera()
+            } else {
+                isCameraActive = false
+                detectorAnalyzer?.isAnalysisEnabled = false
+                Log.i("MainActivity", "Inicialização com permissões ativas. Modo Desligado persistido: câmera mantida em standby.")
+            }
         } else {
             permissionLauncher.launch(missingPermissions.toTypedArray())
         }
     }
 
     private fun startCamera() {
+        val currentMode = binding.cameraModeToggleGroup.checkedButtonId
+        if (currentMode == R.id.btnModeOff) {
+            isCameraActive = false
+            detectorAnalyzer?.isAnalysisEnabled = false
+            currentCameraProvider?.unbindAll()
+            Log.i("MainActivity", "startCamera() cancelado: app está em modo Desligado (Standby).")
+            return
+        }
+
         val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
 
         cameraProviderFuture.addListener({
             val cameraProvider = cameraProviderFuture.get()
             currentCameraProvider = cameraProvider
+
+            // Validação atômica caso o modo tenha sido alterado para Desligado durante a resolução assíncrona
+            val activeMode = binding.cameraModeToggleGroup.checkedButtonId
+            if (activeMode == R.id.btnModeOff) {
+                cameraProvider.unbindAll()
+                isCameraActive = false
+                detectorAnalyzer?.isAnalysisEnabled = false
+                Log.i("MainActivity", "startCamera() abortado após resolução assíncrona: modo Desligado ativo.")
+                return@addListener
+            }
 
             // 1. Preview vinculado ao ViewFinder (modo compatível)
             val preview = Preview.Builder().build().also {
@@ -394,8 +517,7 @@ class MainActivity : AppCompatActivity() {
             detectorAnalyzer = analyzer
 
             // Define se a IA processa com base no modo selecionado (Enquadrar vs Monitorar)
-            val currentMode = binding.cameraModeToggleGroup.checkedButtonId
-            analyzer.isAnalysisEnabled = (currentMode == R.id.btnModeMonitor)
+            analyzer.isAnalysisEnabled = (activeMode == R.id.btnModeMonitor)
 
             imageAnalysis.setAnalyzer(cameraExecutor, analyzer)
 

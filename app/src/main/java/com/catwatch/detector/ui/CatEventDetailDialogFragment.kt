@@ -78,6 +78,13 @@ class CatEventDetailDialogFragment : DialogFragment() {
         // Posiciona no evento clicado dentro da sessão
         val initialIndex = sessionEvents.indexOfFirst { it.id == initialEventId }.coerceAtLeast(0)
         binding.sessionViewPager.setCurrentItem(initialIndex, false)
+        
+        if (sessionEvents.size > 1) {
+            binding.tabLayoutIndicator.visibility = View.VISIBLE
+            com.google.android.material.tabs.TabLayoutMediator(binding.tabLayoutIndicator, binding.sessionViewPager) { _, _ -> }.attach()
+        } else {
+            binding.tabLayoutIndicator.visibility = View.GONE
+        }
 
         val dateFormat = SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.getDefault())
 
