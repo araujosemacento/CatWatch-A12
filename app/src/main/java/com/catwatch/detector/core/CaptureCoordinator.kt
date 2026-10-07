@@ -1,11 +1,9 @@
 package com.catwatch.detector.core
 
-import android.content.ContentValues
 import android.content.Context
 import android.media.MediaScannerConnection
 import android.os.Build
 import android.os.Environment
-import android.provider.MediaStore
 import android.util.Log
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
@@ -84,10 +82,7 @@ class CaptureCoordinator(
         val executor = ioExecutor ?: return
         val onLogged = onEventLogged ?: return
 
-        val storageDir = File(
-            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES),
-            "CatWatch"
-        ).apply {
+        val storageDir = (ctx.getExternalFilesDir(Environment.DIRECTORY_PICTURES) ?: File(ctx.filesDir, "Pictures")).apply {
             if (!exists()) mkdirs()
         }
 
@@ -95,20 +90,7 @@ class CaptureCoordinator(
         val fileName = "CAT_${eventType}_${timestamp}.jpg"
         val photoFile = File(storageDir, fileName)
 
-        val outputOptions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val contentValues = ContentValues().apply {
-                put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
-                put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
-                put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/CatWatch")
-            }
-            ImageCapture.OutputFileOptions.Builder(
-                ctx.contentResolver,
-                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                contentValues
-            ).build()
-        } else {
-            ImageCapture.OutputFileOptions.Builder(photoFile).build()
-        }
+        val outputOptions = ImageCapture.OutputFileOptions.Builder(photoFile).build()
 
         capture.takePicture(
             outputOptions,

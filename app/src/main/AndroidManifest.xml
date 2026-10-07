@@ -28,5 +28,11 @@
             </intent-filter>
         </activity>
 
+        <service
+            android:name=".core.CatWatchService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="camera" />
+
     </application>
 </manifest>

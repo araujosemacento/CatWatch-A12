@@ -1,22 +1,17 @@
 package com.catwatch.detector.ui
 
 import android.Manifest
-import android.app.Dialog
 import android.content.pm.PackageManager
 import android.content.res.Configuration
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.graphics.Color
-import android.media.MediaScannerConnection
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.util.Size
 import android.view.View
-import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.viewModels
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.camera.core.CameraSelector
@@ -33,21 +28,11 @@ import com.catwatch.detector.core.CaptureCoordinator
 import com.catwatch.detector.data.CatEventEntity
 import com.catwatch.detector.data.CatWatchDatabase
 import com.catwatch.detector.databinding.ActivityMainBinding
-import com.catwatch.detector.databinding.DialogFullscreenImageBinding
 import com.google.android.material.datepicker.MaterialDatePicker
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import java.io.File
-import java.text.SimpleDateFormat
-import java.util.Calendar
-import java.util.Date
-import java.util.Locale
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
-
-import androidx.activity.viewModels
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 class MainActivity : AppCompatActivity() {
 
@@ -68,23 +53,35 @@ class MainActivity : AppCompatActivity() {
     private lateinit var cameraExecutor: ExecutorService
     private lateinit var ioExecutor: ExecutorService
 
-    private val permissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) { permissions ->
-        val cameraGranted = permissions[Manifest.permission.CAMERA] ?: false
-        if (cameraGranted) {
-            val prefs = getSharedPreferences("catwatch_prefs", android.content.Context.MODE_PRIVATE)
-            val savedMode = prefs.getInt("camera_mode", R.id.btnModeMonitor)
-            if (savedMode != R.id.btnModeOff) {
-                startCamera()
-            } else {
-                isCameraActive = false
-                Log.i("MainActivity", "Permissões concedidas. Modo Desligado persistido: sensor mantido desativado.")
+    private val permissionLauncher =
+            registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+                    permissions ->
+                val cameraGranted = permissions[Manifest.permission.CAMERA] ?: false
+                if (cameraGranted) {
+                    val prefs =
+                            getSharedPreferences(
+                                    "catwatch_prefs",
+                                    android.content.Context.MODE_PRIVATE
+                            )
+                    val savedMode = prefs.getInt("camera_mode", R.id.btnModeMonitor)
+                    if (savedMode != R.id.btnModeOff) {
+                        startCamera()
+                    } else {
+                        isCameraActive = false
+                        Log.i(
+                                "MainActivity",
+                                "Permissões concedidas. Modo Desligado persistido: sensor mantido desativado."
+                        )
+                    }
+                } else {
+                    Toast.makeText(
+                                    this,
+                                    "Permissão da câmera é necessária para o monitoramento.",
+                                    Toast.LENGTH_LONG
+                            )
+                            .show()
+                }
             }
-        } else {
-            Toast.makeText(this, "Permissão da câmera é necessária para o monitoramento.", Toast.LENGTH_LONG).show()
-        }
-    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -104,6 +101,21 @@ class MainActivity : AppCompatActivity() {
         checkAndRequestPermissions()
 
         observeViewModel()
+        runStoragePurge()
+    }
+
+    private fun runStoragePurge() {
+        lifecycleScope.launch(Dispatchers.IO) {
+            val database = CatWatchDatabase.getDatabase(applicationContext)
+            val purgeManager =
+                    com.catwatch.detector.core.StoragePurgeManager(database.catEventDao())
+            purgeManager.purgeOldEvents(daysToKeep = 30)
+
+            val storageDir = applicationContext.getExternalFilesDir(android.os.Environment.DIRECTORY_PICTURES)
+            if (storageDir != null) {
+                purgeManager.purgeOrphanFiles(storageDir, daysToKeep = 30)
+            }
+        }
     }
 
     private fun setupSlidingPanel() {
@@ -127,7 +139,7 @@ class MainActivity : AppCompatActivity() {
             val target = if (currentTranslation < reposeTranslationY / 2) 0f else reposeTranslationY
             isPanelExpanded = (target == 0f)
             binding.feedPanel.animate().translationY(target).setDuration(250).start()
-            
+
             isStickyModeEnabled = !isPanelExpanded
             if (isPanelExpanded) {
                 binding.fabContainer.visibility = View.VISIBLE
@@ -137,73 +149,87 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        binding.eventsRecyclerView.addOnItemTouchListener(object : androidx.recyclerview.widget.RecyclerView.SimpleOnItemTouchListener() {
-            override fun onInterceptTouchEvent(rv: androidx.recyclerview.widget.RecyclerView, e: android.view.MotionEvent): Boolean {
-                val layoutManager = binding.eventsRecyclerView.layoutManager as? androidx.recyclerview.widget.LinearLayoutManager
-                    ?: return false
-                val firstVisibleItem = layoutManager.findFirstCompletelyVisibleItemPosition()
+        binding.eventsRecyclerView.addOnItemTouchListener(
+                object : androidx.recyclerview.widget.RecyclerView.SimpleOnItemTouchListener() {
+                    override fun onInterceptTouchEvent(
+                            rv: androidx.recyclerview.widget.RecyclerView,
+                            e: android.view.MotionEvent
+                    ): Boolean {
+                        val layoutManager =
+                                binding.eventsRecyclerView.layoutManager as?
+                                        androidx.recyclerview.widget.LinearLayoutManager
+                                        ?: return false
+                        val firstVisibleItem =
+                                layoutManager.findFirstCompletelyVisibleItemPosition()
 
-                when (e.actionMasked) {
-                    android.view.MotionEvent.ACTION_DOWN -> {
-                        isDraggingPanel = false
-                        startY = e.rawY
-                        lastY = e.rawY
-                    }
-                    android.view.MotionEvent.ACTION_MOVE -> {
-                        val totalDy = kotlin.math.abs(e.rawY - startY)
-                        if (totalDy > touchSlop && !isDraggingPanel) {
-                            if (e.rawY - startY < 0 && binding.feedPanel.translationY > 0f) {
-                                isDraggingPanel = true
-                            } else if (e.rawY - startY > 0 && firstVisibleItem <= 0 && binding.feedPanel.translationY < reposeTranslationY) {
-                                isDraggingPanel = true
-                            }
-                            if (isDraggingPanel) {
-                                binding.feedPanel.animate().cancel()
+                        when (e.actionMasked) {
+                            android.view.MotionEvent.ACTION_DOWN -> {
+                                isDraggingPanel = false
+                                startY = e.rawY
                                 lastY = e.rawY
-                                return true
+                            }
+                            android.view.MotionEvent.ACTION_MOVE -> {
+                                val totalDy = kotlin.math.abs(e.rawY - startY)
+                                if (totalDy > touchSlop && !isDraggingPanel) {
+                                    if (e.rawY - startY < 0 && binding.feedPanel.translationY > 0f
+                                    ) {
+                                        isDraggingPanel = true
+                                    } else if (e.rawY - startY > 0 &&
+                                                    firstVisibleItem <= 0 &&
+                                                    binding.feedPanel.translationY <
+                                                            reposeTranslationY
+                                    ) {
+                                        isDraggingPanel = true
+                                    }
+                                    if (isDraggingPanel) {
+                                        binding.feedPanel.animate().cancel()
+                                        lastY = e.rawY
+                                        return true
+                                    }
+                                }
+                            }
+                            android.view.MotionEvent.ACTION_UP,
+                            android.view.MotionEvent.ACTION_CANCEL -> {
+                                if (isDraggingPanel) {
+                                    snapPanel()
+                                    isDraggingPanel = false
+                                    return true
+                                }
+                            }
+                        }
+                        return false
+                    }
+
+                    override fun onTouchEvent(
+                            rv: androidx.recyclerview.widget.RecyclerView,
+                            e: android.view.MotionEvent
+                    ) {
+                        when (e.actionMasked) {
+                            android.view.MotionEvent.ACTION_MOVE -> {
+                                val dy = e.rawY - lastY
+                                lastY = e.rawY
+
+                                if (isDraggingPanel) {
+                                    var newTranslation = binding.feedPanel.translationY + dy
+                                    newTranslation = newTranslation.coerceIn(0f, reposeTranslationY)
+                                    binding.feedPanel.translationY = newTranslation
+                                }
+                            }
+                            android.view.MotionEvent.ACTION_UP,
+                            android.view.MotionEvent.ACTION_CANCEL -> {
+                                if (isDraggingPanel) {
+                                    snapPanel()
+                                    isDraggingPanel = false
+                                }
                             }
                         }
                     }
-                    android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
-                        if (isDraggingPanel) {
-                            snapPanel()
-                            isDraggingPanel = false
-                            return true
-                        }
-                    }
                 }
-                return false
-            }
-
-            override fun onTouchEvent(rv: androidx.recyclerview.widget.RecyclerView, e: android.view.MotionEvent) {
-                when (e.actionMasked) {
-                    android.view.MotionEvent.ACTION_MOVE -> {
-                        val dy = e.rawY - lastY
-                        lastY = e.rawY
-                        
-                        if (isDraggingPanel) {
-                            var newTranslation = binding.feedPanel.translationY + dy
-                            newTranslation = newTranslation.coerceIn(0f, reposeTranslationY)
-                            binding.feedPanel.translationY = newTranslation
-                        }
-                    }
-                    android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
-                        if (isDraggingPanel) {
-                            snapPanel()
-                            isDraggingPanel = false
-                        }
-                    }
-                }
-            }
-        })
+        )
     }
 
     private fun observeViewModel() {
-        lifecycleScope.launch {
-            viewModel.feedItemsState.collect { items ->
-                updateFeed(items)
-            }
-        }
+        lifecycleScope.launch { viewModel.feedItemsState.collect { items -> updateFeed(items) } }
     }
 
     private fun setupRecyclerView() {
@@ -211,73 +237,88 @@ class MainActivity : AppCompatActivity() {
         binding.eventsRecyclerView.adapter = adapter
 
         val gridManager = androidx.recyclerview.widget.GridLayoutManager(this, 2)
-        gridManager.spanSizeLookup = object : androidx.recyclerview.widget.GridLayoutManager.SpanSizeLookup() {
-            override fun getSpanSize(position: Int): Int {
-                return when (adapter.getItemViewType(position)) {
-                    CatEventAdapter.TYPE_DATE_HEADER -> 2
-                    else -> 1
+        gridManager.spanSizeLookup =
+                object : androidx.recyclerview.widget.GridLayoutManager.SpanSizeLookup() {
+                    override fun getSpanSize(position: Int): Int {
+                        return when (adapter.getItemViewType(position)) {
+                            CatEventAdapter.TYPE_DATE_HEADER -> 2
+                            else -> 1
+                        }
+                    }
                 }
-            }
-        }
         binding.eventsRecyclerView.layoutManager = gridManager
 
         fun getFirstVisibleItemPosition(): Int {
-            return (binding.eventsRecyclerView.layoutManager as? androidx.recyclerview.widget.LinearLayoutManager)
-                ?.findFirstVisibleItemPosition() ?: 0
+            return (binding.eventsRecyclerView.layoutManager as?
+                            androidx.recyclerview.widget.LinearLayoutManager)
+                    ?.findFirstVisibleItemPosition()
+                    ?: 0
         }
 
-        binding.eventsRecyclerView.addOnScrollListener(object : androidx.recyclerview.widget.RecyclerView.OnScrollListener() {
-            override fun onScrolled(recyclerView: androidx.recyclerview.widget.RecyclerView, dx: Int, dy: Int) {
-                super.onScrolled(recyclerView, dx, dy)
-                val firstVisibleItem = getFirstVisibleItemPosition()
+        binding.eventsRecyclerView.addOnScrollListener(
+                object : androidx.recyclerview.widget.RecyclerView.OnScrollListener() {
+                    override fun onScrolled(
+                            recyclerView: androidx.recyclerview.widget.RecyclerView,
+                            dx: Int,
+                            dy: Int
+                    ) {
+                        super.onScrolled(recyclerView, dx, dy)
+                        val firstVisibleItem = getFirstVisibleItemPosition()
 
-                if (dy > 0) {
-                    isStickyModeEnabled = false
-                    binding.fabContainer.visibility = View.VISIBLE
-                } else if (dy < 0) {
-                    if (firstVisibleItem == 0) {
-                        isStickyModeEnabled = true
-                        binding.fabContainer.visibility = View.GONE
-                        binding.fabNewItemsBadge.visibility = View.GONE
+                        if (firstVisibleItem <= 0) {
+                            isStickyModeEnabled = true
+                            binding.fabContainer.visibility = View.GONE
+                            binding.fabNewItemsBadge.visibility = View.GONE
+                        } else if (dy > 0) {
+                            isStickyModeEnabled = false
+                            binding.fabContainer.visibility = View.VISIBLE
+                        }
                     }
                 }
-            }
-        })
+        )
 
         binding.fabScrollToTop.setOnClickListener {
             binding.eventsRecyclerView.smoothScrollToPosition(0)
-            val isPortrait = resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT
+            val isPortrait =
+                    resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT
             if (isPortrait && isPanelExpanded) {
                 isPanelExpanded = false
-                binding.feedPanel.animate().translationY(reposeTranslationY).setDuration(250).start()
+                binding.feedPanel
+                        .animate()
+                        .translationY(reposeTranslationY)
+                        .setDuration(250)
+                        .start()
             }
             isStickyModeEnabled = true
             binding.fabContainer.visibility = View.GONE
             binding.fabNewItemsBadge.visibility = View.GONE
         }
 
-        adapter.registerAdapterDataObserver(object : androidx.recyclerview.widget.RecyclerView.AdapterDataObserver() {
-            override fun onItemRangeInserted(positionStart: Int, itemCount: Int) {
-                if (positionStart == 0) {
-                    if (isStickyModeEnabled && getFirstVisibleItemPosition() <= 0) {
-                        binding.eventsRecyclerView.scrollToPosition(0)
-                    } else {
-                        binding.fabContainer.visibility = View.VISIBLE
-                        binding.fabNewItemsBadge.visibility = View.VISIBLE
-                        pulseBadge()
+        adapter.registerAdapterDataObserver(
+                object : androidx.recyclerview.widget.RecyclerView.AdapterDataObserver() {
+                    override fun onItemRangeInserted(positionStart: Int, itemCount: Int) {
+                        if (positionStart == 0) {
+                            val firstVisibleItem = getFirstVisibleItemPosition()
+                            if (isStickyModeEnabled && firstVisibleItem <= 0) {
+                                binding.eventsRecyclerView.scrollToPosition(0)
+                                binding.fabContainer.visibility = View.GONE
+                                binding.fabNewItemsBadge.visibility = View.GONE
+                            } else if (firstVisibleItem > 0) {
+                                binding.fabContainer.visibility = View.VISIBLE
+                                binding.fabNewItemsBadge.visibility = View.VISIBLE
+                                pulseBadge()
+                            }
+                        }
                     }
                 }
-            }
-        })
+        )
 
         adapter.onAlbumClick = { sessionHeader ->
             CatEventDetailDialogFragment.show(
-                supportFragmentManager,
-                sessionHeader.eventsInSession,
-                sessionHeader.coverPhoto
-            ) { evt, onComplete ->
-                viewModel.deleteEvent(evt, onComplete)
-            }
+                    supportFragmentManager,
+                    sessionHeader.eventsInSession,
+                    sessionHeader.coverPhoto
+            ) { evt, onComplete -> viewModel.deleteEvent(evt, onComplete) }
         }
 
         adapter.onSelectionChanged = { selectedCount ->
@@ -287,21 +328,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupToolbars() {
-        binding.selectModeButton.setOnClickListener {
-            enterSelectionMode()
-        }
+        binding.selectModeButton.setOnClickListener { enterSelectionMode() }
 
-        binding.cancelSelectionButton.setOnClickListener {
-            exitSelectionMode()
-        }
+        binding.cancelSelectionButton.setOnClickListener { exitSelectionMode() }
 
-        binding.selectAllButton.setOnClickListener {
-            adapter.selectAll()
-        }
+        binding.selectAllButton.setOnClickListener { adapter.selectAll() }
 
-        binding.deleteSelectedButton.setOnClickListener {
-            confirmBatchDeletion()
-        }
+        binding.deleteSelectedButton.setOnClickListener { confirmBatchDeletion() }
 
         // Configuração do seletor operacional de 3 estados com persistência
         val prefs = getSharedPreferences("catwatch_prefs", android.content.Context.MODE_PRIVATE)
@@ -311,30 +344,34 @@ class MainActivity : AppCompatActivity() {
 
         binding.cameraModeToggleGroup.addOnButtonCheckedListener { _, checkedId, isChecked ->
             if (!isChecked) return@addOnButtonCheckedListener
-            
+
             prefs.edit().putInt("camera_mode", checkedId).apply()
             updateCameraOverlay(checkedId)
-            
+
             when (checkedId) {
                 R.id.btnModeOff -> {
                     detectorAnalyzer?.isAnalysisEnabled = false
                     currentCameraProvider?.unbindAll()
                     isCameraActive = false
-                    Toast.makeText(this, "Câmera desativada (Standby).", Toast.LENGTH_SHORT).show()
+                    com.catwatch.detector.core.CatWatchService.stop(this)
+                    Toast.makeText(this, "Câmera desativada.", Toast.LENGTH_SHORT).show()
                 }
                 R.id.btnModeFrame -> {
                     detectorAnalyzer?.isAnalysisEnabled = false
+                    com.catwatch.detector.core.CatWatchService.start(this)
                     if (!isCameraActive) {
                         startCamera()
                     }
-                    Toast.makeText(this, "Modo Enquadrar ativo (sem inferência de IA).", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this, "Modo de pré visualização ativo.", Toast.LENGTH_SHORT)
+                            .show()
                 }
                 R.id.btnModeMonitor -> {
                     detectorAnalyzer?.isAnalysisEnabled = true
+                    com.catwatch.detector.core.CatWatchService.start(this)
                     if (!isCameraActive) {
                         startCamera()
                     }
-                    Toast.makeText(this, "Modo Monitoramento 24/7 ativo.", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this, "Modo de monitoramento ativo.", Toast.LENGTH_SHORT).show()
                 }
             }
         }
@@ -370,18 +407,23 @@ class MainActivity : AppCompatActivity() {
         if (selectedItems.isEmpty()) return
 
         AlertDialog.Builder(this)
-            .setTitle("Excluir Fotos de Álbuns")
-            .setMessage("Deseja excluir permanentemente ${selectedItems.size} fotos pertencentes aos álbuns selecionados?")
-            .setPositiveButton("Excluir") { _, _ ->
-                executeBatchDeletion(selectedItems)
-            }
-            .setNegativeButton("Cancelar", null)
-            .show()
+                .setTitle("Excluir Fotos de Álbuns")
+                .setMessage(
+                        "Deseja excluir permanentemente ${selectedItems.size} fotos pertencentes aos álbuns selecionados?"
+                )
+                .setPositiveButton("Excluir") { _, _ -> executeBatchDeletion(selectedItems) }
+                .setNegativeButton("Cancelar", null)
+                .show()
     }
 
     private fun executeBatchDeletion(items: List<CatEventEntity>) {
         viewModel.deleteEventsBatch(items) {
-            Toast.makeText(this@MainActivity, "${items.size} fotos excluídas com sucesso.", Toast.LENGTH_SHORT).show()
+            Toast.makeText(
+                            this@MainActivity,
+                            "${items.size} fotos excluídas com sucesso.",
+                            Toast.LENGTH_SHORT
+                    )
+                    .show()
             exitSelectionMode()
         }
     }
@@ -411,9 +453,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun openDateRangePicker() {
-        val picker = MaterialDatePicker.Builder.dateRangePicker()
-            .setTitleText("Selecione o Intervalo")
-            .build()
+        val picker =
+                MaterialDatePicker.Builder.dateRangePicker()
+                        .setTitleText("Selecione o Intervalo")
+                        .build()
 
         picker.addOnPositiveButtonClickListener { selection: Pair<Long, Long>? ->
             if (selection != null) {
@@ -435,7 +478,8 @@ class MainActivity : AppCompatActivity() {
         binding.emptyStateTextView.visibility = if (items.isEmpty()) View.VISIBLE else View.GONE
     }
 
-    // As lógicas de display e carragamento de imagem foram extraídas para CatEventDetailDialog e ImageUtils
+    // As lógicas de display e carragamento de imagem foram extraídas para CatEventDetailDialog e
+    // ImageUtils
 
     private fun checkAndRequestPermissions() {
         val permissionsToRequest = mutableListOf(Manifest.permission.CAMERA)
@@ -443,9 +487,10 @@ class MainActivity : AppCompatActivity() {
             permissionsToRequest.add(Manifest.permission.POST_NOTIFICATIONS)
         }
 
-        val missingPermissions = permissionsToRequest.filter {
-            ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
-        }
+        val missingPermissions =
+                permissionsToRequest.filter {
+                    ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+                }
 
         if (missingPermissions.isEmpty()) {
             val prefs = getSharedPreferences("catwatch_prefs", android.content.Context.MODE_PRIVATE)
@@ -455,7 +500,10 @@ class MainActivity : AppCompatActivity() {
             } else {
                 isCameraActive = false
                 detectorAnalyzer?.isAnalysisEnabled = false
-                Log.i("MainActivity", "Inicialização com permissões ativas. Modo Desligado persistido: câmera mantida em standby.")
+                Log.i(
+                        "MainActivity",
+                        "Inicialização com permissões ativas. Modo Desligado persistido: câmera mantida em standby."
+                )
             }
         } else {
             permissionLauncher.launch(missingPermissions.toTypedArray())
@@ -474,91 +522,112 @@ class MainActivity : AppCompatActivity() {
 
         val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
 
-        cameraProviderFuture.addListener({
-            val cameraProvider = cameraProviderFuture.get()
-            currentCameraProvider = cameraProvider
+        cameraProviderFuture.addListener(
+                {
+                    val cameraProvider = cameraProviderFuture.get()
+                    currentCameraProvider = cameraProvider
 
-            // Validação atômica caso o modo tenha sido alterado para Desligado durante a resolução assíncrona
-            val activeMode = binding.cameraModeToggleGroup.checkedButtonId
-            if (activeMode == R.id.btnModeOff) {
-                cameraProvider.unbindAll()
-                isCameraActive = false
-                detectorAnalyzer?.isAnalysisEnabled = false
-                Log.i("MainActivity", "startCamera() abortado após resolução assíncrona: modo Desligado ativo.")
-                return@addListener
-            }
+                    // Validação atômica caso o modo tenha sido alterado para Desligado durante a
+                    // resolução assíncrona
+                    val activeMode = binding.cameraModeToggleGroup.checkedButtonId
+                    if (activeMode == R.id.btnModeOff) {
+                        cameraProvider.unbindAll()
+                        isCameraActive = false
+                        detectorAnalyzer?.isAnalysisEnabled = false
+                        Log.i(
+                                "MainActivity",
+                                "startCamera() abortado após resolução assíncrona: modo Desligado ativo."
+                        )
+                        return@addListener
+                    }
 
-            // 1. Preview vinculado ao ViewFinder (modo compatível)
-            val preview = Preview.Builder().build().also {
-                it.setSurfaceProvider(binding.viewFinder.surfaceProvider)
-            }
+                    // 1. Preview vinculado ao ViewFinder (modo compatível)
+                    val preview =
+                            Preview.Builder().build().also {
+                                it.setSurfaceProvider(binding.viewFinder.surfaceProvider)
+                            }
 
-            // 2. ImageCapture configurado para fotos sob demanda com compressão de 80% e resolução 720p
-            val capture = ImageCapture.Builder()
-                .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
-                .setTargetResolution(Size(1280, 720))
-                .setJpegQuality(80)
-                .build()
-            imageCapture = capture
+                    // 2. ImageCapture configurado para fotos sob demanda com compressão de 80% e
+                    // resolução 720p
+                    val capture =
+                            ImageCapture.Builder()
+                                    .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+                                    .setTargetResolution(Size(1280, 720))
+                                    .setJpegQuality(80)
+                                    .build()
+                    imageCapture = capture
 
-            // 3. CaptureCoordinator para gerenciar o Dual-Snapshot, cooldown e salvar na Galeria
-            val coordinator = CaptureCoordinator(
-                context = applicationContext,
-                imageCapture = capture,
-                ioExecutor = ioExecutor,
-                coroutineScope = lifecycleScope,
-                onEventLogged = { filePath, confidence, eventType, isConfirmed ->
-                    val event = CatEventEntity(
-                        timestamp = System.currentTimeMillis(),
-                        filePath = filePath,
-                        confidence = confidence,
-                        eventType = eventType,
-                        isConfirmedDrinking = isConfirmed
-                    )
-                    viewModel.insertEvent(event)
-                }
-            )
-            captureCoordinator = coordinator
+                    // 3. CaptureCoordinator para gerenciar o Dual-Snapshot, cooldown e salvar na
+                    // Galeria
+                    val coordinator =
+                            CaptureCoordinator(
+                                    context = applicationContext,
+                                    imageCapture = capture,
+                                    ioExecutor = ioExecutor,
+                                    coroutineScope = lifecycleScope,
+                                    onEventLogged = { filePath, confidence, eventType, isConfirmed
+                                        ->
+                                        val event =
+                                                CatEventEntity(
+                                                        timestamp = System.currentTimeMillis(),
+                                                        filePath = filePath,
+                                                        confidence = confidence,
+                                                        eventType = eventType,
+                                                        isConfirmedDrinking = isConfirmed
+                                                )
+                                        viewModel.insertEvent(event)
+                                    }
+                            )
+                    captureCoordinator = coordinator
 
-            // 4. ImageAnalysis travado em VGA (640x480) com subamostragem temporal
-            @Suppress("DEPRECATION")
-            val imageAnalysis = ImageAnalysis.Builder()
-                .setTargetResolution(Size(640, 480))
-                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                .build()
+                    // 4. ImageAnalysis travado em VGA (640x480) com subamostragem temporal
+                    @Suppress("DEPRECATION")
+                    val imageAnalysis =
+                            ImageAnalysis.Builder()
+                                    .setTargetResolution(Size(640, 480))
+                                    .setBackpressureStrategy(
+                                            ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST
+                                    )
+                                    .build()
 
-            val analyzer = CatDetectorAnalyzer(
-                onCatDetected = { confidence ->
-                    coordinator.onCatCandidate(confidence)
-                }
-            )
-            detectorAnalyzer = analyzer
+                    val analyzer =
+                            CatDetectorAnalyzer(
+                                    onCatDetected = { confidence ->
+                                        coordinator.onCatCandidate(confidence)
+                                    }
+                            )
+                    detectorAnalyzer = analyzer
 
-            // Define se a IA processa com base no modo selecionado (Enquadrar vs Monitorar)
-            analyzer.isAnalysisEnabled = (activeMode == R.id.btnModeMonitor)
+                    // Define se a IA processa com base no modo selecionado (Enquadrar vs Monitorar)
+                    analyzer.isAnalysisEnabled = (activeMode == R.id.btnModeMonitor)
 
-            imageAnalysis.setAnalyzer(cameraExecutor, analyzer)
+                    imageAnalysis.setAnalyzer(cameraExecutor, analyzer)
 
-            // 5. Vinculação ao ciclo de vida da Activity
-            val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
+                    // 5. Vinculação ao ciclo de vida da Activity
+                    val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
 
-            try {
-                cameraProvider.unbindAll()
-                cameraProvider.bindToLifecycle(
-                    this,
-                    cameraSelector,
-                    preview,
-                    imageAnalysis,
-                    capture
-                )
-                isCameraActive = true
-                Log.i("MainActivity", "CameraX inicializado e vinculado ao ciclo de vida com sucesso.")
-            } catch (exc: Exception) {
-                isCameraActive = false
-                Log.e("MainActivity", "Falha ao vincular casos de uso da CameraX", exc)
-            }
-
-        }, ContextCompat.getMainExecutor(this))
+                    try {
+                        cameraProvider.unbindAll()
+                        cameraProvider.bindToLifecycle(
+                                this,
+                                cameraSelector,
+                                preview,
+                                imageAnalysis,
+                                capture
+                        )
+                        isCameraActive = true
+                        com.catwatch.detector.core.CatWatchService.start(this)
+                        Log.i(
+                                "MainActivity",
+                                "CameraX inicializado e vinculado ao ciclo de vida com sucesso."
+                        )
+                    } catch (exc: Exception) {
+                        isCameraActive = false
+                        Log.e("MainActivity", "Falha ao vincular casos de uso da CameraX", exc)
+                    }
+                },
+                ContextCompat.getMainExecutor(this)
+        )
     }
 
     override fun onDestroy() {

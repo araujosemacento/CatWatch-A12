@@ -3,6 +3,7 @@ package com.catwatch.detector.ui
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.view.LayoutInflater
+import android.view.View
 import android.view.ViewGroup
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
@@ -114,6 +115,16 @@ class CatEventAdapter : ListAdapter<FeedItem, RecyclerView.ViewHolder>(DiffCallb
             binding.albumTitleTextView.text = "Álbum ${item.hourRange}"
             binding.albumDateTextView.text = item.dateText
             binding.albumCountBadgeTextView.text = "${item.itemCount} fotos"
+
+            if (isSelectionMode) {
+                binding.selectCheckBox.visibility = View.VISIBLE
+                binding.selectCheckBox.isChecked = selectedSessionIds.contains(item.sessionId)
+                binding.selectCheckBox.setOnClickListener {
+                    toggleSelection(item.sessionId, position)
+                }
+            } else {
+                binding.selectCheckBox.visibility = View.GONE
+            }
 
             binding.root.setOnClickListener {
                 if (isSelectionMode) {
