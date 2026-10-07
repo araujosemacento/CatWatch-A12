@@ -2,54 +2,60 @@ package com.catwatch.detector.utils
 
 import com.catwatch.detector.data.CatEventEntity
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.util.Calendar
 
 class ChainedSessionManagerTest {
 
-    @Test
-    fun getChainedSessionForEvent_singleEvent_returnsSingleItem() {
-        val event = CatEventEntity(id = 1L, timestamp = 1_000_000L, filePath = "path1.jpg", confidence = 0.85f)
-        val allEvents = listOf(event)
-
-        val session = ChainedSessionManager.getChainedSessionForEvent(event, allEvents)
-
-        assertEquals(1, session.size)
-        assertEquals(1L, session[0].id)
+    private fun createTimestamp(year: Int, month: Int, day: Int, hour: Int, minute: Int): Long {
+        return Calendar.getInstance().apply {
+            set(Calendar.YEAR, year)
+            set(Calendar.MONTH, month)
+            set(Calendar.DAY_OF_MONTH, day)
+            set(Calendar.HOUR_OF_DAY, hour)
+            set(Calendar.MINUTE, minute)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
     }
 
     @Test
-    fun getChainedSessionForEvent_dualSnapshotWithin5Seconds_groupsIntoSameSession() {
-        val approach = CatEventEntity(id = 1L, timestamp = 1_000_000L, filePath = "approach.jpg", confidence = 0.85f, eventType = "APPROACH")
-        val drinking = CatEventEntity(id = 2L, timestamp = 1_005_000L, filePath = "drinking.jpg", confidence = 0.92f, eventType = "DRINKING", isConfirmedDrinking = true)
-        val oldEvent = CatEventEntity(id = 3L, timestamp = 500_000L, filePath = "old.jpg", confidence = 0.88f)
+    fun isSameHour_sameHour_returnsTrue() {
+        val t1 = createTimestamp(2026, Calendar.OCTOBER, 7, 14, 5)
+        val t2 = createTimestamp(2026, Calendar.OCTOBER, 7, 14, 55)
 
-        val allEvents = listOf(approach, drinking, oldEvent)
-
-        val sessionFromApproach = ChainedSessionManager.getChainedSessionForEvent(approach, allEvents)
-        val sessionFromDrinking = ChainedSessionManager.getChainedSessionForEvent(drinking, allEvents)
-
-        assertEquals(2, sessionFromApproach.size)
-        assertEquals(listOf(1L, 2L), sessionFromApproach.map { it.id })
-
-        assertEquals(2, sessionFromDrinking.size)
-        assertEquals(listOf(1L, 2L), sessionFromDrinking.map { it.id })
+        assertTrue(ChainedSessionManager.isSameHour(t1, t2))
     }
 
     @Test
-    fun getChainedSessionForEvent_eventFartherThan5Minutes_isolatedFromSession() {
-        val event1 = CatEventEntity(id = 1L, timestamp = 1_000_000L, filePath = "1.jpg", confidence = 0.85f)
-        // 6 minutos depois (360.000 ms)
-        val event2 = CatEventEntity(id = 2L, timestamp = 1_360_000L, filePath = "2.jpg", confidence = 0.89f)
+    fun isSameHour_differentHours_returnsFalse() {
+        val t1 = createTimestamp(2026, Calendar.OCTOBER, 7, 14, 55)
+        val t2 = createTimestamp(2026, Calendar.OCTOBER, 7, 15, 5)
 
-        val allEvents = listOf(event1, event2)
+        assertFalse(ChainedSessionManager.isSameHour(t1, t2))
+    }
 
-        val session1 = ChainedSessionManager.getChainedSessionForEvent(event1, allEvents)
-        val session2 = ChainedSessionManager.getChainedSessionForEvent(event2, allEvents)
+    @Test
+    fun getChainedSessionForEvent_eventsInSameHour_groupedTogether() {
+        val t14_05 = createTimestamp(2026, Calendar.OCTOBER, 7, 14, 5)
+        val t14_50 = createTimestamp(2026, Calendar.OCTOBER, 7, 14, 50)
+        val t15_05 = createTimestamp(2026, Calendar.OCTOBER, 7, 15, 5)
 
-        assertEquals(1, session1.size)
-        assertEquals(1L, session1[0].id)
+        val e1 = CatEventEntity(id = 1L, timestamp = t14_05, filePath = "1.jpg", confidence = 0.85f)
+        val e2 = CatEventEntity(id = 2L, timestamp = t14_50, filePath = "2.jpg", confidence = 0.90f)
+        val e3 = CatEventEntity(id = 3L, timestamp = t15_05, filePath = "3.jpg", confidence = 0.88f)
 
-        assertEquals(1, session2.size)
-        assertEquals(2L, session2[0].id)
+        val allEvents = listOf(e1, e2, e3)
+
+        val session14h = ChainedSessionManager.getChainedSessionForEvent(e1, allEvents)
+        val session15h = ChainedSessionManager.getChainedSessionForEvent(e3, allEvents)
+
+        assertEquals(2, session14h.size)
+        assertEquals(listOf(1L, 2L), session14h.map { it.id })
+
+        assertEquals(1, session15h.size)
+        assertEquals(3L, session15h[0].id)
     }
 }

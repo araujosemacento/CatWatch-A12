@@ -122,13 +122,14 @@ flowchart TD
 * [x] Implementar visualizador de imagem imersivo (Tela Cheia) usando `ViewPager2` num `DialogFragment` (Carrossel Horizontal com Swipe). **Restrição:** O carrossel deve respeitar sessões encadeadas (o primeiro e último item do swipe são o início e fim daquela sessão específica de hidratação).
 * [x] **Gate de Aceite:** O app inicializa sem falhas no Galaxy A12, opera o seletor de 3 estados com controle de inferência e ciclo de vida, transiciona o painel deslizante de feed com zero-jank na GPU e exibe o carrossel em tela cheia restrito à sessão ativa. (CONCLUÍDO)
 
-### Fase 4.2: Agrupamentos e Chained Sessions (Lote 2)
+### Fase 4.2: Agrupamentos e Hierarquia de Álbuns / Accordions (Lote 2)
 
-* [ ] Refatorar a UI de visualização suportando *Grid Mode* e *List Mode* com seletor (Toggle).
-* [ ] Desenvolver algoritmo na ViewModel para identificar "Sessões Encadeadas" (timetags com < 5 min de diferença se unem num único objeto/álbum de sessão).
-* [ ] Adaptar o `CatEventAdapter` para ser um Múltiplo Type Adapter.
-  * No modo Grade: Mostrar fotos avulsas, mas quando em sessão, exibir como álbum com divider da data.
-  * No modo Lista: Dias separados em Accordions expansíveis. As sessões dentro do Accordion recebem um divisor horizontal indicando o grupo encadeado.
+* [x] Refatorar a UI de visualização suportando *Grid Mode* (Álbuns por hora) e *List Mode* (Accordions por hora) com seletor (Toggle) no cabeçalho do feed.
+* [x] Desenvolver algoritmo em `FeedItemMapper` / `ChainedSessionManager` para agrupar eventos ocorridos na mesma hora civil do dia (`Calendar.HOUR_OF_DAY`).
+* [x] Adaptar o `CatEventAdapter` para ser um Múltiplo Type Adapter sobre a lista plana `FeedItem` (`DateHeader`, `SessionHeader`, `EventDetail`), garantindo scroll fluido a 60 FPS no Exynos 850.
+  * No modo Grade: Exibir cartões de Álbuns por hora com foto de capa, título com o horário da sessão (ex: `17:00 ~ 18:00`) e contador de capturas.
+  * No modo Lista: Divisores horizontais sutis por data seguidos de Accordions expansíveis que revelam inline todos os eventos daquela hora.
+* [x] **Gate de Aceite:** O aplicativo alterna perfeitamente entre o modo Grade e Lista com persistência de preferência, agrupando sessões por hora do dia e permitindo expandir accordions e abrir o carrossel em tela cheia sem vazamento de memória ou congelamento da UI. (CONCLUÍDO)
 
 ### Fase 5: Operação 24/7 e Homologação no Galaxy A12
 

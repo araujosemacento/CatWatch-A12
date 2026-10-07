@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.catwatch.detector.data.CatEventEntity
 import com.catwatch.detector.data.CatEventRepository
 import com.catwatch.detector.data.CatWatchDatabase
+import com.catwatch.detector.ui.model.FeedItem
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -18,8 +19,11 @@ class CatEventViewModel(application: Application) : AndroidViewModel(application
     private val repository: CatEventRepository
     private var filterJob: Job? = null
 
-    private val _eventsState = MutableStateFlow<List<CatEventEntity>>(emptyList())
-    val eventsState: StateFlow<List<CatEventEntity>> = _eventsState.asStateFlow()
+    private val _rawEventsState = MutableStateFlow<List<CatEventEntity>>(emptyList())
+    val eventsState: StateFlow<List<CatEventEntity>> = _rawEventsState.asStateFlow()
+
+    private val _feedItemsState = MutableStateFlow<List<FeedItem>>(emptyList())
+    val feedItemsState: StateFlow<List<FeedItem>> = _feedItemsState.asStateFlow()
 
     init {
         val database = CatWatchDatabase.getDatabase(application)
@@ -27,13 +31,19 @@ class CatEventViewModel(application: Application) : AndroidViewModel(application
         loadAllEvents()
     }
 
+    private fun updateFeedItems() {
+        val rawList = _rawEventsState.value
+        _feedItemsState.value = FeedItemMapper.buildFeedItems(rawList)
+    }
+
     fun loadAllEvents() {
         filterJob?.cancel()
         filterJob = viewModelScope.launch {
             repository.getAllEvents()
-                .catch { /* Lidar com erro se necessário */ }
+                .catch { }
                 .collect { events ->
-                    _eventsState.value = events
+                    _rawEventsState.value = events
+                    updateFeedItems()
                 }
         }
     }
@@ -44,7 +54,8 @@ class CatEventViewModel(application: Application) : AndroidViewModel(application
             repository.getEventsToday()
                 .catch { }
                 .collect { events ->
-                    _eventsState.value = events
+                    _rawEventsState.value = events
+                    updateFeedItems()
                 }
         }
     }
@@ -55,7 +66,8 @@ class CatEventViewModel(application: Application) : AndroidViewModel(application
             repository.getEventsLast24h()
                 .catch { }
                 .collect { events ->
-                    _eventsState.value = events
+                    _rawEventsState.value = events
+                    updateFeedItems()
                 }
         }
     }
@@ -66,7 +78,8 @@ class CatEventViewModel(application: Application) : AndroidViewModel(application
             repository.getEventsYesterday()
                 .catch { }
                 .collect { events ->
-                    _eventsState.value = events
+                    _rawEventsState.value = events
+                    updateFeedItems()
                 }
         }
     }
@@ -77,7 +90,8 @@ class CatEventViewModel(application: Application) : AndroidViewModel(application
             repository.getEventsByRange(start, end)
                 .catch { }
                 .collect { events ->
-                    _eventsState.value = events
+                    _rawEventsState.value = events
+                    updateFeedItems()
                 }
         }
     }
@@ -95,20 +109,16 @@ class CatEventViewModel(application: Application) : AndroidViewModel(application
             onComplete()
         }
     }
-    
+
     fun insertEvent(event: CatEventEntity) {
         viewModelScope.launch {
             repository.insertEvent(event)
         }
     }
 
-    /**
-     * Identifica a sessão encadeada à qual o [event] pertence dentro da lista [allEvents].
-     * Agrupa eventos com diferença temporal consecutiva menor ou igual a 5 minutos.
-     */
     fun getChainedSessionForEvent(
         event: CatEventEntity,
-        allEvents: List<CatEventEntity> = _eventsState.value
+        allEvents: List<CatEventEntity> = _rawEventsState.value
     ): List<CatEventEntity> {
         return com.catwatch.detector.utils.ChainedSessionManager.getChainedSessionForEvent(event, allEvents)
     }

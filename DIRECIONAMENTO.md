@@ -384,10 +384,10 @@ Para assegurar excelente usabilidade no acompanhamento do animal, o módulo de U
    * Implementado com `ViewPager2` horizontal e transição suave, com swipe estritamente restrito aos eventos que compõem a **Chained Session** ativa (agrupamento via `ChainedSessionManager` para capturas ocorridas em intervalo $\le 5\text{min}$).
    * **Indicador Dinâmico de Pontos (*Dots Indicator*):** Acoplado através de `TabLayout` e `TabLayoutMediator` com drawable vetorial customizado (`bg_tab_indicator.xml`). O indicador de páginas exibe pontos ovais destacados para a foto ativa e torna-se automaticamente visível apenas quando a sessão possui múltiplas imagens (`sessionEvents.size > 1`), ficando oculto para capturas isoladas.
    * Inclui contador de posição ("Foto X de Y"), metadados dinâmicos e confirmação de exclusão atômica (Room + disco).
-5. **Múltiplos Formatos de Agrupamento (*Grid Mode* & *List Mode*):** *(Lote 2)*
-   * Lógica analítica no `CatEventViewModel` capaz de agrupar fotos contínuas espaçadas por $< 5\text{min}$ numa única **Chained Session** (Sessão Encadeada de Hidratação).
-   * No modo grade: Sessões viram "Álbuns" indicando o tempo de início e fim. Divisores de data isolam os dias.
-   * No modo lista: Visualização por "Accordions" (dias colapsáveis), e itens de sessão divididos com uma barra indicativa de continuidade de evento.
+5. **Múltiplos Formatos de Agrupamento (*Grid Mode* & *List Mode*):** *(IMPLEMENTADO)*
+   * Lógica analítica em `FeedItemMapper` e `ChainedSessionManager` capaz de agrupar capturas da mesma hora civil do dia (`Calendar.HOUR_OF_DAY`) numa única **Chained Session** (Sessão Encadeada de Hidratação por hora).
+   * No modo grade: Sessões viram "Álbuns" de 2 colunas indicando o intervalo de tempo (ex: `17:00 ~ 18:00`) com foto de capa e badge com a quantidade de capturas.
+   * No modo lista: Divisores horizontais sutis por data seguidos de "Accordions" expansíveis por hora que revelam inline todos os eventos individuais daquela sessão, preservando a fluidez de scroll a 60 FPS no Exynos 850 através da arquitetura de lista plana unificada (`FeedItem`).
 6. **Filtro Temporal Dinâmico e Exclusões em Lote:** *(IMPLEMENTADO)*
    * Chips de filtros rápidos (*"Hoje"*, *"Últimas 24h"*, *"Ontem"*, *"Todos"*) e *MaterialDatePicker* para intervalo customizado com ícones vetoriais nativos.
    * Modo de seleção em lote com contêiner unificado (`toolbarContainer`), eliminando sobreposição com a barra de chips e garantindo proteção contra escalas de fontes ampliadas.

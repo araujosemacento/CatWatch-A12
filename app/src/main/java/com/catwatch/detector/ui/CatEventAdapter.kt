@@ -2,193 +2,191 @@ package com.catwatch.detector.ui
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.graphics.Color
 import android.view.LayoutInflater
-import android.view.View
 import android.view.ViewGroup
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
 import com.catwatch.detector.data.CatEventEntity
-import com.catwatch.detector.databinding.ItemCatEventBinding
+import com.catwatch.detector.databinding.ItemFeedAlbumGridBinding
+import com.catwatch.detector.databinding.ItemFeedDateHeaderBinding
+import com.catwatch.detector.ui.model.FeedItem
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
-class CatEventAdapter : ListAdapter<CatEventEntity, CatEventAdapter.CatEventViewHolder>(DiffCallback) {
-
-    private val dateFormat = SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.getDefault())
+class CatEventAdapter : ListAdapter<FeedItem, RecyclerView.ViewHolder>(DiffCallback) {
 
     var isSelectionMode: Boolean = false
         private set
 
-    val selectedIds = mutableSetOf<Long>()
+    val selectedSessionIds = mutableSetOf<String>()
 
-    var onItemClick: ((CatEventEntity) -> Unit)? = null
-    var onItemLongClick: ((CatEventEntity) -> Unit)? = null
+    var onAlbumClick: ((FeedItem.SessionHeader) -> Unit)? = null
     var onSelectionChanged: ((Int) -> Unit)? = null
 
     fun setSelectionMode(enabled: Boolean) {
         if (isSelectionMode != enabled) {
             isSelectionMode = enabled
             if (!enabled) {
-                selectedIds.clear()
+                selectedSessionIds.clear()
             }
             notifyDataSetChanged()
-            onSelectionChanged?.invoke(selectedIds.size)
+            onSelectionChanged?.invoke(selectedSessionIds.size)
         }
     }
 
-    fun toggleSelection(id: Long, position: Int) {
-        if (selectedIds.contains(id)) {
-            selectedIds.remove(id)
+    fun toggleSelection(sessionId: String, position: Int) {
+        if (selectedSessionIds.contains(sessionId)) {
+            selectedSessionIds.remove(sessionId)
         } else {
-            selectedIds.add(id)
+            selectedSessionIds.add(sessionId)
         }
         notifyItemChanged(position)
-        onSelectionChanged?.invoke(selectedIds.size)
+        onSelectionChanged?.invoke(selectedSessionIds.size)
     }
 
     fun selectAll() {
-        selectedIds.clear()
-        selectedIds.addAll(currentList.map { it.id })
+        selectedSessionIds.clear()
+        currentList.filterIsInstance<FeedItem.SessionHeader>().forEach {
+            selectedSessionIds.add(it.sessionId)
+        }
         notifyDataSetChanged()
-        onSelectionChanged?.invoke(selectedIds.size)
+        onSelectionChanged?.invoke(selectedSessionIds.size)
     }
 
     fun clearSelection() {
-        selectedIds.clear()
+        selectedSessionIds.clear()
         notifyDataSetChanged()
         onSelectionChanged?.invoke(0)
     }
 
-    fun getSelectedItems(): List<CatEventEntity> {
-        return currentList.filter { selectedIds.contains(it.id) }
+    fun getSelectedEvents(): List<CatEventEntity> {
+        return currentList.filterIsInstance<FeedItem.SessionHeader>()
+            .filter { selectedSessionIds.contains(it.sessionId) }
+            .flatMap { it.eventsInSession }
     }
 
-    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): CatEventViewHolder {
-        val binding = ItemCatEventBinding.inflate(
-            LayoutInflater.from(parent.context),
-            parent,
-            false
-        )
-        return CatEventViewHolder(binding)
-    }
-
-    override fun onBindViewHolder(holder: CatEventViewHolder, position: Int) {
-        val event = getItem(position)
-        holder.bind(event, position)
-
-        holder.itemView.setOnClickListener {
-            if (isSelectionMode) {
-                toggleSelection(event.id, holder.bindingAdapterPosition)
-            } else {
-                onItemClick?.invoke(event)
-            }
-        }
-
-        holder.itemView.setOnLongClickListener {
-            if (!isSelectionMode) {
-                setSelectionMode(true)
-                toggleSelection(event.id, holder.bindingAdapterPosition)
-            }
-            onItemLongClick?.invoke(event)
-            true
+    override fun getItemViewType(position: Int): Int {
+        return when (getItem(position)) {
+            is FeedItem.DateHeader -> TYPE_DATE_HEADER
+            is FeedItem.SessionHeader -> TYPE_ALBUM_GRID
         }
     }
 
-    inner class CatEventViewHolder(
-        private val binding: ItemCatEventBinding
+    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RecyclerView.ViewHolder {
+        val inflater = LayoutInflater.from(parent.context)
+        return if (viewType == TYPE_DATE_HEADER) {
+            val binding = ItemFeedDateHeaderBinding.inflate(inflater, parent, false)
+            DateHeaderViewHolder(binding)
+        } else {
+            val binding = ItemFeedAlbumGridBinding.inflate(inflater, parent, false)
+            AlbumGridViewHolder(binding)
+        }
+    }
+
+    override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
+        val item = getItem(position)
+
+        when (holder) {
+            is DateHeaderViewHolder -> holder.bind(item as FeedItem.DateHeader)
+            is AlbumGridViewHolder -> holder.bind(item as FeedItem.SessionHeader, position)
+        }
+    }
+
+    inner class DateHeaderViewHolder(
+        private val binding: ItemFeedDateHeaderBinding
     ) : RecyclerView.ViewHolder(binding.root) {
+        fun bind(item: FeedItem.DateHeader) {
+            binding.dateHeaderTextView.text = item.dateText
+        }
+    }
 
+    inner class AlbumGridViewHolder(
+        private val binding: ItemFeedAlbumGridBinding
+    ) : RecyclerView.ViewHolder(binding.root) {
         private var loadJob: Job? = null
 
-        fun bind(event: CatEventEntity, position: Int) {
-            binding.timestampTextView.text = dateFormat.format(Date(event.timestamp))
-            binding.confidenceTextView.text = "Confiança: %.1f%%".format(event.confidence * 100)
-            binding.filePathTextView.text = File(event.filePath).name
+        fun bind(item: FeedItem.SessionHeader, position: Int) {
+            binding.albumTitleTextView.text = "Álbum ${item.hourRange}"
+            binding.albumDateTextView.text = item.dateText
+            binding.albumCountBadgeTextView.text = "${item.itemCount} fotos"
 
-            // Status Badge: Hidratação vs Aproximação (sem emojis, com ícones vetoriais nativos)
-            if (event.isConfirmedDrinking || event.eventType == "DRINKING") {
-                binding.statusBadgeTextView.text = "Bebendo"
-                binding.statusBadgeTextView.setBackgroundResource(com.catwatch.detector.R.drawable.bg_badge_drinking)
-                binding.statusBadgeTextView.setCompoundDrawablesWithIntrinsicBounds(com.catwatch.detector.R.drawable.ic_water_drop, 0, 0, 0)
-            } else {
-                binding.statusBadgeTextView.text = "Aproximação"
-                binding.statusBadgeTextView.setBackgroundResource(com.catwatch.detector.R.drawable.bg_badge_approach)
-                binding.statusBadgeTextView.setCompoundDrawablesWithIntrinsicBounds(com.catwatch.detector.R.drawable.ic_visibility, 0, 0, 0)
-            }
-
-            // Controle de Checkbox no Modo de Seleção Múltipla
-            if (isSelectionMode) {
-                binding.selectCheckBox.visibility = View.VISIBLE
-                binding.selectCheckBox.isChecked = selectedIds.contains(event.id)
-                binding.selectCheckBox.setOnClickListener {
-                    toggleSelection(event.id, position)
+            binding.root.setOnClickListener {
+                if (isSelectionMode) {
+                    toggleSelection(item.sessionId, position)
+                } else {
+                    onAlbumClick?.invoke(item)
                 }
-            } else {
-                binding.selectCheckBox.visibility = View.GONE
             }
 
-            // Carregamento de Thumbnail em RGB_565 para proteção de memória
-            loadJob?.cancel()
-            binding.thumbnailImageView.setImageDrawable(null)
+            binding.root.setOnLongClickListener {
+                if (!isSelectionMode) {
+                    setSelectionMode(true)
+                    toggleSelection(item.sessionId, position)
+                }
+                true
+            }
 
+            loadJob?.cancel()
+            binding.albumCoverImageView.setImageDrawable(null)
             loadJob = CoroutineScope(Dispatchers.Main).launch {
                 val bitmap = withContext(Dispatchers.IO) {
-                    loadSubsampledBitmap(event.filePath, 150, 150)
+                    loadSubsampledBitmap(item.coverPhoto.filePath, 200, 200)
                 }
                 if (bitmap != null) {
-                    binding.thumbnailImageView.setImageBitmap(bitmap)
+                    binding.albumCoverImageView.setImageBitmap(bitmap)
                 } else {
-                    binding.thumbnailImageView.setImageResource(android.R.drawable.ic_menu_camera)
+                    binding.albumCoverImageView.setImageResource(android.R.drawable.ic_menu_camera)
                 }
-            }
-        }
-
-        private fun loadSubsampledBitmap(path: String, reqWidth: Int, reqHeight: Int): Bitmap? {
-            val file = File(path)
-            if (!file.exists()) return null
-
-            return try {
-                val options = BitmapFactory.Options().apply {
-                    inJustDecodeBounds = true
-                }
-                BitmapFactory.decodeFile(path, options)
-
-                var inSampleSize = 1
-                if (options.outHeight > reqHeight || options.outWidth > reqWidth) {
-                    val halfHeight = options.outHeight / 2
-                    val halfWidth = options.outWidth / 2
-                    while (halfHeight / inSampleSize >= reqHeight && halfWidth / inSampleSize >= reqWidth) {
-                        inSampleSize *= 2
-                    }
-                }
-
-                val decodeOptions = BitmapFactory.Options().apply {
-                    this.inSampleSize = inSampleSize
-                    inPreferredConfig = Bitmap.Config.RGB_565
-                }
-                BitmapFactory.decodeFile(path, decodeOptions)
-            } catch (e: Exception) {
-                null
             }
         }
     }
 
-    companion object DiffCallback : DiffUtil.ItemCallback<CatEventEntity>() {
-        override fun areItemsTheSame(oldItem: CatEventEntity, newItem: CatEventEntity): Boolean {
-            return oldItem.id == newItem.id
-        }
+    private fun loadSubsampledBitmap(path: String, reqWidth: Int, reqHeight: Int): Bitmap? {
+        val file = File(path)
+        if (!file.exists()) return null
 
-        override fun areContentsTheSame(oldItem: CatEventEntity, newItem: CatEventEntity): Boolean {
-            return oldItem == newItem
+        return try {
+            val options = BitmapFactory.Options().apply {
+                inJustDecodeBounds = true
+            }
+            BitmapFactory.decodeFile(path, options)
+
+            var inSampleSize = 1
+            if (options.outHeight > reqHeight || options.outWidth > reqWidth) {
+                val halfHeight = options.outHeight / 2
+                val halfWidth = options.outWidth / 2
+                while (halfHeight / inSampleSize >= reqHeight && halfWidth / inSampleSize >= reqWidth) {
+                    inSampleSize *= 2
+                }
+            }
+
+            val decodeOptions = BitmapFactory.Options().apply {
+                this.inSampleSize = inSampleSize
+                inPreferredConfig = Bitmap.Config.RGB_565
+            }
+            BitmapFactory.decodeFile(path, decodeOptions)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    companion object {
+        const val TYPE_DATE_HEADER = 0
+        const val TYPE_ALBUM_GRID = 1
+
+        val DiffCallback = object : DiffUtil.ItemCallback<FeedItem>() {
+            override fun areItemsTheSame(oldItem: FeedItem, newItem: FeedItem): Boolean {
+                return oldItem.id == newItem.id
+            }
+
+            override fun areContentsTheSame(oldItem: FeedItem, newItem: FeedItem): Boolean {
+                return oldItem == newItem
+            }
         }
     }
 }

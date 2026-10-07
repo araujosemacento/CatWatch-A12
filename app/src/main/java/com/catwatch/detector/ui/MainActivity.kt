@@ -200,8 +200,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun observeViewModel() {
         lifecycleScope.launch {
-            viewModel.eventsState.collect { events ->
-                updateFeed(events)
+            viewModel.feedItemsState.collect { items ->
+                updateFeed(items)
             }
         }
     }
@@ -210,12 +210,26 @@ class MainActivity : AppCompatActivity() {
         adapter = CatEventAdapter()
         binding.eventsRecyclerView.adapter = adapter
 
-        val layoutManager = binding.eventsRecyclerView.layoutManager as androidx.recyclerview.widget.LinearLayoutManager
+        val gridManager = androidx.recyclerview.widget.GridLayoutManager(this, 2)
+        gridManager.spanSizeLookup = object : androidx.recyclerview.widget.GridLayoutManager.SpanSizeLookup() {
+            override fun getSpanSize(position: Int): Int {
+                return when (adapter.getItemViewType(position)) {
+                    CatEventAdapter.TYPE_DATE_HEADER -> 2
+                    else -> 1
+                }
+            }
+        }
+        binding.eventsRecyclerView.layoutManager = gridManager
+
+        fun getFirstVisibleItemPosition(): Int {
+            return (binding.eventsRecyclerView.layoutManager as? androidx.recyclerview.widget.LinearLayoutManager)
+                ?.findFirstVisibleItemPosition() ?: 0
+        }
 
         binding.eventsRecyclerView.addOnScrollListener(object : androidx.recyclerview.widget.RecyclerView.OnScrollListener() {
             override fun onScrolled(recyclerView: androidx.recyclerview.widget.RecyclerView, dx: Int, dy: Int) {
                 super.onScrolled(recyclerView, dx, dy)
-                val firstVisibleItem = layoutManager.findFirstVisibleItemPosition()
+                val firstVisibleItem = getFirstVisibleItemPosition()
 
                 if (dy > 0) {
                     isStickyModeEnabled = false
@@ -245,7 +259,7 @@ class MainActivity : AppCompatActivity() {
         adapter.registerAdapterDataObserver(object : androidx.recyclerview.widget.RecyclerView.AdapterDataObserver() {
             override fun onItemRangeInserted(positionStart: Int, itemCount: Int) {
                 if (positionStart == 0) {
-                    if (isStickyModeEnabled && layoutManager.findFirstVisibleItemPosition() <= 0) {
+                    if (isStickyModeEnabled && getFirstVisibleItemPosition() <= 0) {
                         binding.eventsRecyclerView.scrollToPosition(0)
                     } else {
                         binding.fabContainer.visibility = View.VISIBLE
@@ -256,15 +270,18 @@ class MainActivity : AppCompatActivity() {
             }
         })
 
-        adapter.onItemClick = { event ->
-            val session = viewModel.getChainedSessionForEvent(event)
-            CatEventDetailDialogFragment.show(supportFragmentManager, session, event) { evt, onComplete ->
+        adapter.onAlbumClick = { sessionHeader ->
+            CatEventDetailDialogFragment.show(
+                supportFragmentManager,
+                sessionHeader.eventsInSession,
+                sessionHeader.coverPhoto
+            ) { evt, onComplete ->
                 viewModel.deleteEvent(evt, onComplete)
             }
         }
 
         adapter.onSelectionChanged = { selectedCount ->
-            binding.selectionCountTextView.text = "$selectedCount selecionados"
+            binding.selectionCountTextView.text = "$selectedCount álbuns"
             binding.deleteSelectedButton.isEnabled = selectedCount > 0
         }
     }
@@ -349,12 +366,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun confirmBatchDeletion() {
-        val selectedItems = adapter.getSelectedItems()
+        val selectedItems = adapter.getSelectedEvents()
         if (selectedItems.isEmpty()) return
 
         AlertDialog.Builder(this)
-            .setTitle("Excluir Fotos")
-            .setMessage("Deseja excluir permanentemente ${selectedItems.size} fotos selecionadas do banco e do disco?")
+            .setTitle("Excluir Fotos de Álbuns")
+            .setMessage("Deseja excluir permanentemente ${selectedItems.size} fotos pertencentes aos álbuns selecionados?")
             .setPositiveButton("Excluir") { _, _ ->
                 executeBatchDeletion(selectedItems)
             }
@@ -411,10 +428,11 @@ class MainActivity : AppCompatActivity() {
         picker.show(supportFragmentManager, "DATE_RANGE_PICKER")
     }
 
-    private fun updateFeed(events: List<CatEventEntity>) {
-        adapter.submitList(events)
-        binding.feedTitleTextView.text = "Detecções (${events.size})"
-        binding.emptyStateTextView.visibility = if (events.isEmpty()) View.VISIBLE else View.GONE
+    private fun updateFeed(items: List<com.catwatch.detector.ui.model.FeedItem>) {
+        adapter.submitList(items)
+        val totalCount = viewModel.eventsState.value.size
+        binding.feedTitleTextView.text = "Detecções ($totalCount)"
+        binding.emptyStateTextView.visibility = if (items.isEmpty()) View.VISIBLE else View.GONE
     }
 
     // As lógicas de display e carragamento de imagem foram extraídas para CatEventDetailDialog e ImageUtils

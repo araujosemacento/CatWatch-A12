@@ -1,14 +1,25 @@
 package com.catwatch.detector.utils
 
 import com.catwatch.detector.data.CatEventEntity
+import java.util.Calendar
 
 object ChainedSessionManager {
-    const val CHAINED_SESSION_THRESHOLD_MS = 5 * 60 * 1000L // 5 minutos
+
+    /**
+     * Verifica se dois timestamps ocorrem no mesmo ano, mesmo dia do ano e mesma hora do dia (0-23h).
+     */
+    fun isSameHour(timestamp1: Long, timestamp2: Long): Boolean {
+        val cal1 = Calendar.getInstance().apply { timeInMillis = timestamp1 }
+        val cal2 = Calendar.getInstance().apply { timeInMillis = timestamp2 }
+        return cal1.get(Calendar.YEAR) == cal2.get(Calendar.YEAR) &&
+                cal1.get(Calendar.DAY_OF_YEAR) == cal2.get(Calendar.DAY_OF_YEAR) &&
+                cal1.get(Calendar.HOUR_OF_DAY) == cal2.get(Calendar.HOUR_OF_DAY)
+    }
 
     /**
      * Identifica a sessão encadeada à qual o [event] pertence dentro da lista [allEvents].
-     * Agrupa eventos com diferença temporal consecutiva menor ou igual a 5 minutos.
-     * Retorna a lista da sessão ordenada cronologicamente (do início ao fim da sessão).
+     * Agrupa todos os eventos ocorridos na mesma hora civil do dia.
+     * Retorna a lista da sessão ordenada cronologicamente (do início ao fim da hora).
      */
     fun getChainedSessionForEvent(
         event: CatEventEntity,
@@ -16,24 +27,9 @@ object ChainedSessionManager {
     ): List<CatEventEntity> {
         if (allEvents.isEmpty()) return listOf(event)
 
-        val sortedAsc = allEvents.sortedBy { it.timestamp }
-        val targetIndex = sortedAsc.indexOfFirst { it.id == event.id }
-        if (targetIndex == -1) return listOf(event)
+        val hourEvents = allEvents.filter { isSameHour(it.timestamp, event.timestamp) }
+            .sortedBy { it.timestamp }
 
-        var startIndex = targetIndex
-        while (startIndex > 0 &&
-            (sortedAsc[startIndex].timestamp - sortedAsc[startIndex - 1].timestamp) <= CHAINED_SESSION_THRESHOLD_MS
-        ) {
-            startIndex--
-        }
-
-        var endIndex = targetIndex
-        while (endIndex < sortedAsc.size - 1 &&
-            (sortedAsc[endIndex + 1].timestamp - sortedAsc[endIndex].timestamp) <= CHAINED_SESSION_THRESHOLD_MS
-        ) {
-            endIndex++
-        }
-
-        return sortedAsc.subList(startIndex, endIndex + 1)
+        return if (hourEvents.isNotEmpty()) hourEvents else listOf(event)
     }
 }

@@ -28,7 +28,7 @@ class CaptureCoordinator(
     private val coroutineScope: CoroutineScope = CoroutineScope(Dispatchers.Default),
     private val currentTimeProvider: () -> Long = { System.currentTimeMillis() },
     private val snapshotAction: ((String, Float, Boolean) -> Unit)? = null,
-    val confirmationDelayMs: Long = 5_000L,
+    val confirmationDelayMs: Long = 15_000L,
     val cooldownDurationMs: Long = 120_000L
 ) {
     private var lastEventTimestamp = 0L
